@@ -21,7 +21,7 @@ async function ve() {
       { ok: "on", loi: "off", token: "off" }[s.tool] || "");
   dat("h10", { ok: "Đã đăng nhập", logged_out: "Chưa đăng nhập", unknown: "Chưa rõ (kiểm tra khi có job)" }[s.h10] || s.h10,
       { ok: "on", logged_out: "off" }[s.h10] || "");
-  dat("adapter", a.ready ? `Sẵn sàng (${a.version})` : "Chưa có, cần dò API", a.ready ? "on" : "warn");
+  dat("adapter", a.ready ? `Sẵn sàng (${a.version})` : "Chưa có, cần soi Cerebro 1 lượt", a.ready ? "on" : "warn");
 
   const [nhan, dot] = PHASE[s.phase] || [s.phase, ""];
   dat("job", s.job ? `${nhan}: ${s.job.asin} · ${KY[s.job.period] || s.job.period}` : nhan, dot);

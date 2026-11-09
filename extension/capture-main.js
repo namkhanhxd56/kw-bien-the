@@ -1,6 +1,6 @@
-// Chạy trong trang members.helium10.com (world MAIN), trước script của trang.
-// Ghi lại request fetch/XHR của trang để dò API Cerebro. Chỉ chuyển cho capture-relay.js;
-// relay quyết định có gửi về tool hay không (khi bật "Ghi lại request" trong popup).
+// Chạy trong mọi trang/khung *.helium10.com (world MAIN), trước script của trang.
+// Ghi lại request fetch/XHR và dữ liệu trang nhận về, để biết Cerebro chạy thế nào. Chỉ chuyển cho
+// capture-relay.js; relay quyết định có gửi về tool hay không (khi bật "Soi Cerebro" trong popup).
 (() => {
   if (window.__kwbtCapture) return;
   window.__kwbtCapture = true;
@@ -12,7 +12,10 @@
   const anBody = s => String(s).replace(/((?:_?csrf|xsrf|authenticity)[\w-]*["']?\s*[=:]\s*["']?)[^&"',\s}]+/gi, "$1[ẩn]");
   const cat = (s, n) => (s == null ? null : (s.length > n ? s.slice(0, n) + `…[cắt, dài ${s.length}]` : s));
   const tuyetDoi = u => { try { return new URL(u, location.href).href; } catch { return String(u); } };
-  const canGhi = u => /helium10\.com/i.test(u) && !BO_QUA.test(u);
+  // Dữ liệu Cerebro có thể đi qua tên miền khác (Pacvue là công ty mẹ của H10), nên ghi mọi request
+  // của trang trừ quảng cáo/thống kê.
+  const RAC = /google-analytics|googletagmanager|google\.com\/(ccm|rmkt|pagead)|analytics\.google|doubleclick|getbeamer|sentry|hotjar|intercom|segment\.(io|com)|cdn-cgi\/rum|clarity\.ms|facebook|tiktok/i;
+  const canGhi = u => /^https?:/i.test(u) && !BO_QUA.test(u) && !RAC.test(u);
 
   function bodyText(b) {
     if (b == null) return null;
