@@ -166,31 +166,31 @@ function bangKw(kw) {
       <td class="small" style="white-space:normal">${esc((r.neg || []).join("; "))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
-function khoi({ so, ten, tag, nhan, mot, hai, kw, cls, chinh = true }) {
+// Dòng đầu khối: "tên biến thể + loại (SV: …; … keyword)", dòng dưới: "x/3 ASIN - rank tốt nhất …"
+function khoi({ ten, tag, nhan, kw, cls, chinh = true, soAsin, rank }) {
   const i = KHOI.push({ ten, kw: kw.map(r => r.keyword), chinh }) - 1;
+  const sv = kw.reduce((n, r) => n + (r.sv || 0), 0);
+  const duoi = [soAsin != null ? `${soAsin}/${BT.NA} ASIN` : "", rank != null ? `rank tốt nhất ${rank}` : ""].filter(Boolean).join(" - ");
   return `<details class="vb ${cls || ""}" ${moHet ? "open" : ""}>
     <summary>
-      <span class="vt"><span class="caret" aria-hidden="true"></span>${so != null ? `<span class="so">${so}.</span>` : ""}<span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}</span>
-      <span class="vm">${mot}${nhan !== undefined ? chonNhan(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
-      ${hai ? `<span class="vr">${hai}</span>` : ""}
+      <span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}<span class="sl">(SV: ${fmt(sv)}; ${kw.length} keyword)</span></span>
+      <span class="vm">${nhan !== undefined ? chonNhan(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
+      ${duoi ? `<span class="vr">${duoi}</span>` : ""}
     </summary>
     ${kw.length ? bangKw(kw) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
   </details>`;
 }
 
-const rankAsin = per => BT.asins.map(a => `<span>${a}: <b>${per[a] == null ? "—" : "r" + per[a]}</b></span>`).join("");
-const soLieu = v => `<span><b>${v.so_asin}/${BT.NA}</b> ASIN</span><span>rank tốt nhất <b>${v.rank}</b></span><span><b>${fmt(v.sv)}</b> SV</span><span><b>${v.so_kw}</b> kw</span>`;
-
 function renderChon(el) {
-  let html = `<p class="small muted" style="margin:0 0 12px">Chỉ giữ biến thể đúng với sản phẩm, xếp gần → xa: biến thể nhiều ASIN đối thủ dùng chung đứng trước; cùng số ASIN thì rank tốt nhất nhỏ hơn đứng trước. Đặt nhãn “Không hợp” để loại; thứ tự tự xếp lại.</p>`;
+  let html = `<p class="small muted" style="margin:0 0 12px">Chỉ giữ biến thể đúng với sản phẩm. Product trước rồi đến Gift; trong mỗi loại, biến thể nhiều ASIN đối thủ dùng chung đứng trước, cùng số ASIN thì rank tốt nhất nhỏ hơn đứng trước. Keyword trong khối xếp theo Search Volume. Đặt nhãn “Không hợp” để loại.</p>`;
   let truoc = null;
   for (const v of BT.chon) {
-    if (v.so_asin !== truoc) { html += `<div class="nhom-head">Dùng ở ${v.so_asin}/${BT.NA} ASIN đối thủ</div>`; truoc = v.so_asin; }
-    html += khoi({ so: v.thu_tu, ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, mot: soLieu(v), hai: rankAsin(v.per) });
+    if (v.sheet !== truoc) { html += `<div class="nhom-head">${SHEET[v.sheet]}</div>`; truoc = v.sheet; }
+    html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, soAsin: v.so_asin, rank: v.rank });
   }
   if (BT.loai.length) {
     html += `<div class="nhom-head">Loại: không sát sản phẩm</div>`;
-    for (const v of BT.loai) html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, cls: "loai", chinh: false, mot: soLieu(v), hai: rankAsin(v.per) });
+    for (const v of BT.loai) html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, cls: "loai", chinh: false, soAsin: v.so_asin, rank: v.rank });
   }
   if (!BT.chon.length && !BT.loai.length) html += `<div class="empty"><h3>Chưa rút được biến thể nào</h3><p>Không ASIN nào có keyword chứa ornament / gift trong top 1–50.</p></div>`;
   el.innerHTML = html;
@@ -213,11 +213,10 @@ function renderTungAsin(el) {
   if (!asinChon || !ds.some(t => t.asin === asinChon)) asinChon = ds[0]?.asin;
   const t = ds.find(x => x.asin === asinChon);
   el.innerHTML = `<div class="seg" role="group" aria-label="Chọn ASIN">${ds.map(x => `<button type="button" data-asin="${x.asin}" aria-pressed="${x.asin === asinChon}">${x.asin} · ${KY[x.ky] || x.ky}</button>`).join("")}</div>
-    <p class="small muted" style="margin:0 0 12px">Biến thể của riêng ASIN này: rút từ kw chứa ornament / gift rank 1–50 của chính ASIN; rank tốt nhất là rank của kw biến thể trong ASIN này; kw của ASIN gom vào biến thể theo rule.</p>
+    <p class="small muted" style="margin:0 0 12px">Biến thể của riêng ASIN này: rút từ kw chứa ornament / gift rank 1–50 của chính ASIN; rank tốt nhất là rank của kw biến thể trong ASIN này; kw của ASIN gom vào biến thể theo rule, xếp theo Search Volume.</p>
     ${Object.entries(t.bien_the).map(([sheet, vs]) => `<div class="nhom-head">${SHEET[sheet]}: ${vs.filter(v => !v.phu).length} biến thể</div>` +
-      (vs.length ? vs.map(v => khoi({ ten: v.ten, kw: v.kw, cls: v.phu ? "phu" : "", chinh: !v.phu,
-        mot: (v.rank != null ? `<span>rank tốt nhất <b>${v.rank}</b></span>` : "") + `<span><b>${fmt(v.sv)}</b> SV</span><span><b>${v.so_kw}</b> kw</span>`,
-        hai: v.root ? `<span>root: <b>${esc(v.root)}</b></span>` : "" })).join("") : '<p class="small muted">Không có.</p>')).join("")}`;
+      (vs.length ? vs.map(v => khoi({ ten: v.ten, tag: v.phu ? "" : SHEET[sheet], kw: v.kw, cls: v.phu ? "phu" : "", chinh: !v.phu, rank: v.rank }))
+        .join("") : '<p class="small muted">Không có.</p>')).join("")}`;
   el.querySelectorAll("[data-asin]").forEach(b => b.onclick = () => { asinChon = b.dataset.asin; dongBoHash(); renderTab(); });
 }
 

@@ -462,15 +462,17 @@ def chia_nhom(rows: list[dict], asins: list[str], neg: dict, *, theo_asin: dict 
 
 
 def xep_uu_tien(ket: dict, danh_gia: dict, loai: set) -> tuple[list, list]:
-    """Tầng 3: biến thể cho sản phẩm của mình, gần → xa: nhiều ASIN đối thủ dùng chung trước, cùng số ASIN thì
-    rank tốt nhất nhỏ hơn trước (vd 3/3 ASIN rank 1 → 3/3 rank 2 → … → 2/3 rank 1 …). Biến thể có nhãn trong
-    `loai` (không sát sản phẩm) bị loại ra danh sách riêng."""
+    """Tầng 3: biến thể cho sản phẩm của mình. Product trước rồi mới đến Gift (như thứ tự chia sheet); trong mỗi
+    loại xếp gần → xa: nhiều ASIN đối thủ dùng chung trước, cùng số ASIN thì rank tốt nhất nhỏ hơn trước
+    (vd 3/3 ASIN rank 1 → 3/3 rank 2 → … → 2/3 rank 1 …). Biến thể có nhãn trong `loai` bị loại ra riêng."""
     chon, bo = [], []
     for sheet, ds in ket.items():
         for v in ds:
             x = {**v, "sheet": sheet, "nhan": danh_gia.get(v["ten"], "")}
             (bo if x["nhan"] in loai else chon).append(x)
-    chon.sort(key=lambda v: (-v["so_asin"], v["rank"], -v["sv"]))
+    thu_tu_sheet = {s: i for i, s in enumerate(GOC)}
+    chon.sort(key=lambda v: (thu_tu_sheet[v["sheet"]], -v["so_asin"], v["rank"], -v["sv"]))
+    bo.sort(key=lambda v: (thu_tu_sheet[v["sheet"]], -v["so_asin"], v["rank"]))
     return chon, bo
 
 
@@ -517,7 +519,7 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
         for c in ws[ws.max_row]:
             c.font = B
             c.fill = fill
-        for r in sorted(rs, key=lambda r: (r["rank"] if r["rank"] is not None else 9e9, -(r["sv"] or 0))):
+        for r in sorted(rs, key=lambda r: (-(r["sv"] or 0), r["rank"] if r["rank"] is not None else 9e9)):   # SV cao trước
             ws.append([r["keyword"], r["sv"], r["trend"], r["rank"], r["asin"],
                        f"{r.get('so_asin', 1)}/{NA}", KY.get(r.get("ky"), r.get("ky")), "; ".join(r["neg"])])
             ws.row_dimensions[ws.max_row].outline_level = 1
@@ -631,7 +633,7 @@ def ket_qua_json(res: dict, danh_gia: dict | None = None, loai: set | None = Non
     NA, asins = res["NA"], res["asins"]
     gon = lambda r: {"keyword": r["keyword"], "sv": r["sv"], "trend": r["trend"], "rank": r["rank"], "asin": r["asin"],
                      "so_asin": r.get("so_asin", 1), "ky": r.get("ky"), "neg": r["neg"]}
-    xep_kw = lambda rs: sorted(rs, key=lambda r: (r["rank"] if r["rank"] is not None else 9e9, -(r["sv"] or 0)))
+    xep_kw = lambda rs: sorted(rs, key=lambda r: (-(r["sv"] or 0), r["rank"] if r["rank"] is not None else 9e9))   # SV cao trước
     khoi = lambda rs, sheet, ten: [gon(r) for r in xep_kw([r for r in rs if r["sheet"] == sheet and r["khoi"] == ten])]
     rows = res["rows"]
 
