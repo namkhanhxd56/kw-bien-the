@@ -37,7 +37,7 @@
 
   // Sổ dữ liệu cho bộ lấy Cerebro (adapter.js): giữ nguyên văn phản hồi Cerebro mà chính trang nhận về.
   // Luôn bật, chỉ nằm trong RAM của tab, không gửi đi đâu.
-  const SO_RE = /\/rta\/|validate-asin|uses-remaining/;
+  const SO_RE = /\/rta\/|pacvue\.com\/(?!segment)|validate-asin|uses-remaining|export/i;
   window.__kwbtNet = [];
   function ghiSo(item) {
     const a = window.__kwbtNet;

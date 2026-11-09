@@ -15,7 +15,8 @@ HOST=127.0.0.1 PORT=8796 python3 -u server.py
 1. **Phân tích ảnh sản phẩm.** Ảnh main được tải từ 🌼 2026 Product Flow, mỗi ảnh tải một lần rồi cache vào `data/img`. Chỉ căn cứ vào ảnh; Tên mẫu, Niche và Chất liệu trên Lark chỉ để tham khảo. Hiện người tự ghi kết quả vào form, nút "Phân tích bằng AI" chưa bật.
 2. **Lấy keyword.** ASIN đối thủ lấy từ cột `ASIN đối thủ (>=3)` (ASIN trùng bị bỏ). Có thể thêm ASIN tạm trong tool. Cần tối thiểu 3 ASIN. Bấm "Tạo bộ & lấy keyword" thì mỗi ASIN thành một job trong hàng đợi.
    - Bộ lọc: kỳ **12/2025**, Exclude variations, SV ≥ 50, Organic rank ≥ 1, mỗi ASIN chạy 1 lần.
-   - Nếu kỳ 12/2025 trả về 0 dòng, server tự xếp lại job với **kỳ hiện tại**. Kỳ đã dùng được ghi cho từng ASIN.
+   - Nếu kỳ 12/2025 trả về 0 dòng (sản phẩm mới), server tự xếp lại job với **kỳ hiện tại, bỏ Time Period
+     và không lọc SV / organic rank**. Kỳ đã dùng được ghi cho từng ASIN.
    - Khi extension chưa lấy được: bấm "Tải file tay" để nạp file Cerebro đã export (xlsx/csv).
 3. **Trang `/kw-list/<tên bộ>`.** Hiển thị keyword đã gộp: mỗi keyword giữ dòng có organic rank tốt nhất, hoà thì lấy SV cao hơn. Có lọc, sắp xếp, tải CSV. Nút "Ghi link vào Lark" ghi vào cột `Link bộ Keyword`, có hộp xác nhận trước khi ghi.
 4. **Xác định biến thể.** Bước sau, chưa có trong bản này.

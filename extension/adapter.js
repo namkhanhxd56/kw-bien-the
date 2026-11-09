@@ -14,7 +14,8 @@
 // Hợp đồng trả về:
 //   { ok: true, period_used: "2025-12" | "current", rows: [{ keyword, search_volume, search_volume_trend, organic_rank }] }
 //   { ok: false, error, login?: true, het_luot?: true, log: [...], debug: "..." }
-// rows rỗng ở kỳ 2025-12 là bình thường: server tự xếp lại job với kỳ hiện tại.
+// rows rỗng ở kỳ 2025-12 là bình thường (sản phẩm mới): server tự xếp lại job với kỳ hiện tại, lượt đó
+// không chọn Time Period và không lọc SV/organic rank.
 
 export const ADAPTER = {
   ready: true,
@@ -76,23 +77,28 @@ export const ADAPTER = {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }
     let gan = null;   // phần tử đang thao tác, để chụp giao diện quanh nó khi lỗi
+    let sauExport = null;   // các request trang gửi sau cú bấm Export, khi không thấy dữ liệu
     function debug() {
       const hop = [...document.querySelectorAll('[role=dialog], [role=listbox], [class*="odal"], [class*="opover"], [class*="icker"], [class*="ropdown"], [class*="enu"]')]
         .filter(thay).map(e => e.outerHTML.slice(0, 2500));
       let quanh = null;
       if (gan) { let e = gan; for (let i = 0; i < 4 && e.parentElement; i++) e = e.parentElement; quanh = e.outerHTML.slice(0, 4000); }
-      return JSON.stringify({ url: location.href, hop: hop.slice(0, 3), quanh, focus: document.activeElement?.outerHTML?.slice(0, 300),
+      return JSON.stringify({ url: location.href, hop: hop.slice(0, 3), quanh, sauExport, focus: document.activeElement?.outerHTML?.slice(0, 300),
                               chu: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 1500) }).slice(0, 9000);
     }
+    // Kỳ 12/2025: lọc SV ≥ 50, organic rank ≥ 1. Kỳ hiện tại (ASIN không có keyword ở 12/2025, tức sản phẩm
+    // mới): không lọc gì, giữ mọi dòng Cerebro trả về.
     const doiDong = (rs, ky) => {
+      const loc = ky !== "current";
       const svMin = filters.search_volume_min ?? 50, rankMin = filters.organic_rank_min ?? 1;
       const rows = rs.map(r => ({
         keyword: String(r.phrase ?? r.keyword ?? "").trim(),
         search_volume: r.impressionExact30 ?? r.searchVolume ?? null,
         search_volume_trend: r.searchVolumeTrend30 ?? r.searchVolumeTrend ?? null,
         organic_rank: r.organicPosition || r.organicRank || null,
-      })).filter(r => r.keyword && (r.search_volume ?? 0) >= svMin && r.organic_rank != null && r.organic_rank >= rankMin);
-      log(`${rs.length} dòng Cerebro → ${rows.length} dòng sau lọc SV ≥ ${svMin}, rank ≥ ${rankMin} (${ky})`);
+      })).filter(r => r.keyword && (!loc || ((r.search_volume ?? 0) >= svMin && r.organic_rank != null && r.organic_rank >= rankMin)));
+      log(loc ? `${rs.length} dòng Cerebro → ${rows.length} dòng sau lọc SV ≥ ${svMin}, rank ≥ ${rankMin} (${ky})`
+              : `${rs.length} dòng Cerebro, giữ cả ${rows.length} dòng: kỳ hiện tại không lọc SV/rank (sản phẩm mới)`);
       return rows;
     };
 
@@ -106,14 +112,30 @@ export const ADAPTER = {
       await nghi(400, 900);
       bam(kieu);
       log(`bấm Export ${kieu.dataset.testid}`);
-      try {
-        const x = await cho(() => tim(/\/rta\/cerebro\/.*\/export\/?(\?|$)/, "GET", sau), 180000, "dữ liệu Export");
-        if (x.status >= 400) throw new Error(`Export lỗi: ${loiH10(x)}`);
+      // Phản hồi Export: lúc soi (kỳ cũ) là GET …/export/ trả {data: [ {phrase…} ]}. Nhận mọi phản hồi sau cú bấm
+      // có danh sách dòng keyword, không bám một đường dẫn cố định.
+      const dongCua = x => {
+        if (x.status >= 400) return null;
         const d = json(x);
-        if (!Array.isArray(d?.data)) throw new Error("Export không trả về danh sách dòng như lúc soi");
+        const ds = Array.isArray(d?.data) ? d.data : Array.isArray(d?.data?.data) ? d.data.data : Array.isArray(d) ? d : null;
+        return ds && (ds.length === 0 ? /export/i.test(x.url) : ds[0] && "phrase" in ds[0]) ? ds : null;
+      };
+      try {
+        let ds = null;
+        try {
+          const x = await cho(() => so().find(x => x.t >= sau && (dongCua(x) || (/export/i.test(x.url) && x.status >= 400))), 180000, "dữ liệu Export");
+          if (x.status >= 400) throw new Error(`Export lỗi: ${loiH10(x)}`);
+          ds = dongCua(x);
+          log(`Export qua ${x.method} ${x.url.replace(/^https?:\/\/[^/]+/, "").split("?")[0]}`);
+          const conLoc = (x.url.match(/(impressionExact30From|organicPositionFrom|timePeriod|wordCount\w*)=/g) || []).join(" ");
+          if (conLoc) log(`Export còn bộ lọc của H10: ${conLoc}`);
+        } catch (e) {
+          sauExport = so().filter(x => x.t >= sau).map(x => `${x.method} ${x.status} ${x.url.split("?")[0]} (${(x.body || "").length}b)`);
+          throw e;
+        }
         await sleep(2500);   // chờ trang dựng file xong để chặn nốt lượt tải
-        log(`Export: ${d.data.length} dòng, đã chặn ${window.__kwbtDaChan} file tải về`);
-        return d.data;
+        log(`Export: ${ds.length} dòng, đã chặn ${window.__kwbtDaChan} file tải về`);
+        return ds;
       } finally {
         window.__kwbtChanTai = false;
       }
@@ -236,17 +258,31 @@ export const ADAPTER = {
         }
         const hid = json(h)?.data?.id;
         log(`tìm kỳ ${gui.periodFrom} → ${gui.periodTo}, mã ${hid}`);
-        const hd = await cho(() => tim(new RegExp(`/search/history/${hid}/data`), "GET", tKy), 300000, "bảng keyword kỳ cũ");
-        const dem = json(hd)?.data?.count ?? json(hd)?.data?.tableData?.length ?? 0;
+        // Chỉ tin "0 keyword" khi trang đã báo lượt tìm kỳ cũ xong (status 3 = "Search is Done");
+        // chưa xong thì chờ lượt tải bảng kế tiếp.
+        const demCua = x => json(x)?.data?.count ?? json(x)?.data?.tableData?.length ?? 0;
+        const xong = () => json(h)?.data?.status === 3 || so().some(x => x.t >= tKy && new RegExp(`/history/${hid}/status`).test(x.url) && json(x)?.data?.status === 3);
+        const hd = await cho(() => so().filter(x => x.t >= tKy && new RegExp(`/search/history/${hid}/data`).test(x.url))
+          .find(x => demCua(x) > 0 || xong()), 300000, "bảng keyword kỳ cũ");
+        const dem = demCua(hd);
         log(`kỳ ${filters.period}: ${dem} keyword`);
         if (!dem) return { ok: true, period_used: filters.period, rows: [], log: LOG };   // server tự chuyển sang kỳ hiện tại
         const rs = await exportJson(Date.now() - 500);
         return { ok: true, period_used: filters.period, rows: doiDong(rs, filters.period), log: LOG };
       }
 
-      // 5. Kỳ hiện tại: Export luôn
+      // 5. Kỳ hiện tại (sản phẩm mới): không Time Period, không lọc. Lượt tìm mở lại có thể còn bộ lọc H10 đã lưu
+      // (kể cả kỳ vừa chọn ở lượt 12/2025), nên bấm Clear trước khi Export.
+      const xoa = theoChu(/^Clear( all| filters)?$/i, "button, [role=button]");
+      if (xoa) {
+        await nghi();
+        const tXoa = Date.now();
+        bam(xoa);
+        log("bấm Clear (bỏ bộ lọc H10 đã lưu)");
+        await cho(() => tim(/\/search\/single\/\d+\/data/, "GET", tXoa), 15000, "bảng sau Clear").catch(() => log("Clear không tải lại bảng"));
+      }
       const rs = await exportJson(Date.now() - 500);
-      return { ok: true, period_used: "current", rows: doiDong(rs, "kỳ hiện tại"), log: LOG };
+      return { ok: true, period_used: "current", rows: doiDong(rs, "current"), log: LOG };
     } catch (e) {
       return { ok: false, error: String(e.message || e), login: !!e.login, log: LOG, debug: debug() };
     }

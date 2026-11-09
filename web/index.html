@@ -278,10 +278,11 @@ function renderS2() {
     <div>
       <div class="small muted" style="margin-bottom:6px">Bộ lọc Cerebro (cố định)</div>
       <div class="filters">
-        <span class="filter">Kỳ <b>12/2025</b> · không có kết quả thì lấy <b>kỳ hiện tại</b></span>
+        <span class="filter">Kỳ <b>12/2025</b></span>
         <span class="filter"><b>Exclude variations</b></span>
         <span class="filter">Search volume <b>≥ ${f ? f.search_volume_min : 50}</b></span>
         <span class="filter">Organic rank <b>≥ ${f ? f.organic_rank_min : 1}</b></span>
+        <span class="filter">12/2025 không có keyword (sản phẩm mới) → <b>kỳ hiện tại, không lọc SV/rank</b></span>
         <span class="filter">Mỗi ASIN <b>1 lần chạy</b></span>
       </div>
     </div>
@@ -338,7 +339,7 @@ function boHtml(bo) {
   const rows = bo.trang_thai_asin.map(a => {
     const [lbl, cls] = TT[a.trang_thai] || [a.trang_thai, ""];
     let ky = a.period_used ? KY[a.period_used] : (a.period_dang_thu ? "đang thử " + KY[a.period_dang_thu] : "—");
-    if (a.period_used === "current") ky = "kỳ hiện tại (12/2025 không có)";
+    if (a.period_used === "current") ky = "kỳ hiện tại, không lọc (12/2025 không có)";
     const ghi = [...(a.loi ? [`<span style="color:var(--bad)">${esc(a.loi)}</span>`] : []), ...a.canh_bao.map(c => `<span style="color:var(--warn)">${esc(c)}</span>`)];
     const busy = a.trang_thai === "cho" || a.trang_thai === "dang_lay";
     return `<tr class="${ghi.length ? "has-sub" : ""}">

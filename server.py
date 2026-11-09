@@ -80,6 +80,7 @@ def luu_tru() -> dict:
 BO_LOC = {
     "period": KY_CHINH,
     "period_fallback": KY_HIEN_TAI,
+    "loc_ky_hien_tai": False,   # kỳ hiện tại = sản phẩm mới (12/2025 không có keyword): không lọc SV/rank
     "exclude_variations": True,
     "search_volume_min": SV_MIN,
     "organic_rank_min": RANK_MIN,
@@ -345,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
         ten = (q.get("filename") or [""])[0]
         asin_file = cerebro.ASIN_RE.search(ten.upper())
         rows = cerebro.doc_file(self._body(), ten)
-        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN)
+        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN) if period == KY_CHINH else []
         if asin_file and asin_file.group(0) != asin:
             canh_bao.insert(0, f"Tên file có ASIN {asin_file.group(0)}, khác ASIN đang chọn {asin}")
         store.cancel(slug, asin)
@@ -447,7 +448,8 @@ class Handler(BaseHTTPRequestHandler):
             store.update_job(job_id, status="empty", rows=0, finished_at=time.time())
             store.enqueue(j["slug"], j["asin"], period=KY_HIEN_TAI, attempt=j["attempt"] + 1)
             return self._json({"ok": True, "tiep": "thu_ky_hien_tai"})
-        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN) if rows else []
+        # Kỳ hiện tại là sản phẩm mới: cố ý không lọc SV/rank, nên không cảnh báo về bộ lọc
+        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN) if rows and period_used == KY_CHINH else []
         store.save_asin_data(j["slug"], j["asin"], rows=rows, period_used=period_used,
                              nguon="h10", canh_bao=canh_bao)
         store.update_job(job_id, status="done" if rows else "empty", rows=len(rows),
