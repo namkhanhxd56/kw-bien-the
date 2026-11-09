@@ -386,8 +386,12 @@ class Handler(BaseHTTPRequestHandler):
         canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN) if period == KY_CHINH else []
         if asin_file and asin_file.group(0) != asin:
             canh_bao.insert(0, f"Tên file có ASIN {asin_file.group(0)}, khác ASIN đang chọn {asin}")
+        # nguon=h10: dữ liệu do extension lấy (vd chuyển bộ từ tool ở máy lên cloud), mặc định là file tải tay
+        nguon = (q.get("nguon") or ["file"])[0]
+        if nguon not in ("file", "h10"):
+            raise ValueError("Nguồn không hợp lệ")
         store.cancel(slug, asin)
-        store.save_asin_data(slug, asin, rows=rows, period_used=period, nguon="file", canh_bao=canh_bao)
+        store.save_asin_data(slug, asin, rows=rows, period_used=period, nguon=nguon, canh_bao=canh_bao)
         self._json({"ok": True, "so_kw": len(rows), "canh_bao": canh_bao, "list": tom_tat_bo(meta)})
 
     def _export(self, slug: str):
