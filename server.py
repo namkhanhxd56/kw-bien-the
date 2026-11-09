@@ -11,7 +11,7 @@ Chạy:  HOST=127.0.0.1 PORT=8796 python3 -u server.py
 
 Biến môi trường:
   HOST / PORT       mặc định 127.0.0.1:8796; có PORT mà không có HOST (Railway) thì 0.0.0.0.
-                    Bind ra ngoài bắt buộc có BRO_AUTH_URL + BRO_AUTH_API_KEY (xem auth.py).
+                    Bind ra ngoài cần BRO_AUTH_URL + BRO_AUTH_API_KEY, hoặc ALLOW_NO_AUTH=1 (xem auth.py).
   PUBLIC_URL        domain dựng link bộ keyword (mặc định https://$RAILWAY_PUBLIC_DOMAIN,
                     ở máy là http://localhost:<PORT>)
   DATA_DIR          nơi lưu dữ liệu (mặc định ./data)
@@ -434,7 +434,7 @@ def main():
         print("  agent   : CHƯA đặt AGENT_TOKEN → extension không gọi được /api/agent/* từ ngoài")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"KW Biến Thể chạy ở http://{HOST}:{PORT}  ·  link bộ keyword: {PUBLIC_URL}/kw-list/<tên bộ>\n"
-          f"  auth    : {'bro-auth ' + auth.BASE_URL if auth.enabled() else 'TẮT (chỉ chạy ở máy)'}\n"
+          f"  auth    : {'bro-auth ' + auth.BASE_URL if auth.enabled() else 'TẮT' + (' (chỉ chạy ở máy)' if HOST in auth.LOOPBACK else ', không cần đăng nhập')}\n"
           f"  lark    : {lark.BACKEND}  ·  dữ liệu: {DATA}", flush=True)
     srv.serve_forever()
 

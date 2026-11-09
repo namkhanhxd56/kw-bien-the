@@ -63,7 +63,8 @@ Cách chạy một job:
 `LARK_FLOW_TABLE`, `LARK_APP_ID` + `LARK_APP_SECRET` (có thì đọc Lark bằng Open API thay cho lark-cli),
 `BRO_AUTH_URL` + `BRO_AUTH_API_KEY` (đăng nhập).
 
-Ở máy: không cần biến nào, `HOST=127.0.0.1` và auth tắt. Bind ra ngoài mà thiếu bro-auth thì server tự thoát.
+Ở máy: không cần biến nào, `HOST=127.0.0.1` và auth tắt. Bind ra ngoài mà thiếu bro-auth thì server tự thoát,
+trừ khi đặt `ALLOW_NO_AUTH=1` (chạy không đăng nhập, ai có link cũng dùng được).
 
 ## Deploy Railway
 
@@ -73,6 +74,7 @@ Giống Kho-Keyword: Nixpacks + `railway.json`, health check `/healthz`.
 2. Thêm **Volume** gắn vào `/data`, đặt biến `DATA_DIR=/data`. Không có volume thì mỗi lần deploy là mất hết bộ keyword và job.
 3. Biến môi trường:
    - `BRO_AUTH_URL`, `BRO_AUTH_API_KEY`: lấy ở trang admin bro-auth, dùng chung tài khoản với Content-Listing.
+     Giai đoạn tạm chưa gắn đăng nhập: bỏ hai biến này, đặt `ALLOW_NO_AUTH=1`.
    - `LARK_APP_ID`, `LARK_APP_SECRET`: cùng app Lark với Content-Listing (app đó đã được thêm vào Base `B53Nb…`).
    - `AGENT_TOKEN`: một chuỗi ngẫu nhiên dài. Nhập cùng chuỗi đó vào popup của extension.
 4. Settings → Networking → Generate Domain. Domain này là phần đầu của link `…/kw-list/<tên bộ>` ghi vào Lark.

@@ -123,6 +123,16 @@ try:
     t("bind 0.0.0.0 phải thoát", "không thoát", "SystemExit")
 except SystemExit as e:
     t("bind 0.0.0.0 mà chưa cấu hình → thoát", "chưa cấu hình bro-auth" in str(e), True)
+os.environ["ALLOW_NO_AUTH"] = "1"
+auth.init("0.0.0.0")
+t("bind 0.0.0.0 + ALLOW_NO_AUTH=1 → chạy, auth tắt", auth.enabled(), False)
+os.environ["ALLOW_NO_AUTH"] = "true"
+try:
+    auth.init("0.0.0.0")
+    t("ALLOW_NO_AUTH khác '1' không được tính", "không thoát", "SystemExit")
+except SystemExit:
+    t("ALLOW_NO_AUTH khác '1' không được tính", "SystemExit", "SystemExit")
+os.environ.pop("ALLOW_NO_AUTH")
 auth.init("127.0.0.1")
 t("bind loopback → chạy, auth tắt", auth.enabled(), False)
 t("BRO_AUTH_URL thiếu scheme được thêm https", auth._normalize_url("abc.up.railway.app"), "https://abc.up.railway.app")

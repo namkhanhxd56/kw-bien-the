@@ -8,8 +8,9 @@ kw.view: thêm endpoint mà quên khai quyền thì nó đóng, không hở.
 X-Agent-Token và server tự kiểm (server.py `_agent_ok`). Chạy trên mạng mà thiếu AGENT_TOKEN
 thì server chỉ nhận agent từ loopback, tức là chặn hết.
 
-Không có auth (chưa cấu hình BRO_AUTH_URL) chỉ được phép khi bind loopback. Bind ra ngoài mà
-thiếu cấu hình thì thoát luôn, để không bao giờ đẩy một tool không khoá lên mạng.
+Không có auth (chưa cấu hình BRO_AUTH_URL) chỉ được phép khi bind loopback, hoặc khi đặt rõ
+ALLOW_NO_AUTH=1 (giai đoạn tạm, chưa gắn đăng nhập). Bind ra ngoài mà thiếu cả hai thì thoát luôn,
+để không đẩy một tool không khoá lên mạng chỉ vì quên biến.
 """
 import os
 import re
@@ -91,9 +92,13 @@ def init(bind_host: str) -> None:
     global _auth
     if not configured():
         if bind_host not in LOOPBACK:
+            # Chạy hở ra mạng phải là quyết định có chủ ý (ALLOW_NO_AUTH=1), không phải do quên biến
+            if os.environ.get("ALLOW_NO_AUTH") == "1":
+                print(f"  auth    : TẮT dù đang bind {bind_host} (ALLOW_NO_AUTH=1) — ai có link cũng dùng được")
+                return
             sys.exit(
                 f"\n  DỪNG: đang bind {bind_host} (ra ngoài) mà chưa cấu hình bro-auth.\n"
-                f"  Đặt BRO_AUTH_URL + BRO_AUTH_API_KEY, hoặc bind 127.0.0.1.\n"
+                f"  Đặt BRO_AUTH_URL + BRO_AUTH_API_KEY, hoặc ALLOW_NO_AUTH=1 để chạy không đăng nhập.\n"
             )
         if BASE_URL and not API_KEY:
             print("  auth    : có BRO_AUTH_URL nhưng THIẾU BRO_AUTH_API_KEY → tắt auth")
