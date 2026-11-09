@@ -339,141 +339,191 @@ def _bac2(v: dict) -> tuple:
     return (tier, -n, v["nhom"], v["rank"], -v["sv_root"])
 
 
+THU_TU_SHEET = ["KW PRODUCT", "FUNCTION", "KW GIFTS", "Seasonal"]   # Product → Function → Gift → Occasion
+TU_KHOI = {"FUNCTION": FUNC_WORDS, "Seasonal": SEASON_WORDS}
+
+
+def phan_sheet(T: list[str], k: str) -> tuple[str, str | None]:
+    """Thứ tự phân loại: có ornament → Product; không thì có từ công năng → Function (kể cả có gift);
+    không thì có gift → Gift; không thì có dịp lễ → Occasion (Seasonal); còn lại → Function 'chưa phân loại'.
+    Trả (sheet, từ khối) — từ khối chỉ có ở Function / Occasion."""
+    if hit("ornament", T):
+        return "KW PRODUCT", None
+    fw = next((w for w in FUNC_WORDS if phrase_hit(w, k, T)), None)
+    if fw:
+        return "FUNCTION", fw
+    if hit("gift", T):
+        return "KW GIFTS", None
+    sw = next((w for w in SEASON_WORDS if phrase_hit(w, k, T)), None)
+    if sw:
+        return "Seasonal", sw
+    return "FUNCTION", "chưa phân loại"
+
+
+def _rut_bien_the(ds: list, goc: str, rank_root: int) -> dict:
+    """3.1: kw gốc của sheet (rank 1–rank_root, không negative), bỏ từ gốc + chữ chung, phần còn lại là biến thể.
+    ds: [(asin, rank, sv, keyword, N)] đã lọc đúng sheet. Trả {tên: {per: {asin: rank tốt nhất}, …}}."""
+    bt = {}
+    for a, rank, sv, kw, N in sorted(ds, key=lambda x: (x[1], -x[2])):
+        con = [t for t in N if t not in CHUNG and not hit(goc, [t]) and not re.fullmatch(r"20\d\d", t)]
+        if not con:
+            continue
+        ten = " ".join(dict.fromkeys(con))
+        v = bt.setdefault(ten, {"ten": ten, "per": {}, "vi_du": kw, "sv_root": sv})
+        v["per"].setdefault(a, {"rank": rank, "kw": kw})
+    return bt
+
+
+def _gom(rs: list, thu_tu: list) -> None:
+    """5: mỗi kw vào biến thể đầu tiên khớp theo thứ tự lọc; dính negative thì vào khối negative."""
+    for r in rs:
+        v = None if r["neg"] else next((v for v in thu_tu if _thuoc(v["ten"], r["N"])), None)
+        r["var"] = v["ten"] if v else None
+        r["khoi"] = "Loại bỏ (negative)" if r["neg"] else (r["var"] or "chưa phân loại")
+
+
 def chia_nhom(rows: list[dict], asins: list[str], neg: dict, *, theo_asin: dict | None = None, sv_min=50, rank_min=1,
               rank_root=50, target_year="2026", mien_loc=("current",)) -> dict:
     """rows: kw đã gộp (để chia khối). theo_asin: {asin: {"rows": [...], "period_used": ...}} dữ liệu Cerebro riêng
-    từng ASIN, dùng cho bước 3.2 (rank tốt nhất của biến thể TRONG từng ASIN); thiếu thì suy từ dòng gộp."""
+    từng ASIN, dùng cho bước 3.2 (rank tốt nhất của biến thể TRONG từng ASIN); thiếu thì suy từ dòng gộp.
+    Sheet theo thứ tự Product → Function → Gift → Occasion. Product / Gift: biến thể rút từ dữ liệu (kw chứa
+    ornament / gift rank 1–50). Function / Occasion: khối theo từ công năng / dịp lễ, số ASIN = số ASIN có kw
+    của khối (mọi rank), rank tốt nhất = rank tốt nhất của kw khối trong từng ASIN."""
     NA = len(asins)
     tach = lambda kw: toks(kw.replace("u.s.", "us").replace("u.s", "us"))
     vocab = set()
     for r in rows:
         r["T"] = tach(r["keyword"])
         vocab.update(r["T"])
-    for r in rows:
-        r["k"] = " ".join(r["T"])
-        r["N"] = _chuan_tok(r["T"], vocab)
-        r["trong_loc"] = r.get("ky") in mien_loc or (
-            r["rank"] is not None and r["rank"] >= rank_min and (r["sv"] or 0) >= sv_min)
-        r["neg"] = find_neg(r["k"], r["T"], neg, target_year)
-        if not r["trong_loc"]:
-            r["sheet"] = "Ngoai bo loc"
-        elif hit("ornament", r["T"]):
-            r["sheet"] = "KW PRODUCT"
-        elif hit("gift", r["T"]):
-            r["sheet"] = "KW GIFTS"
+
+    def chuan(x: dict, a=None, ky=None) -> dict:
+        T = tach(x["keyword"])
+        d = {**x, "T": T, "k": " ".join(T), "N": _chuan_tok(T, vocab)}
+        if a is not None:
+            d.update(asin=a, ky=ky)
+        ky = d.get("ky")
+        d["trong_loc"] = ky in mien_loc or (d["rank"] is not None and d["rank"] >= rank_min and (d["sv"] or 0) >= sv_min)
+        d["neg"] = find_neg(d["k"], T, neg, target_year)
+        d["sheet"], d["tu"] = ("Ngoai bo loc", None) if not d["trong_loc"] else phan_sheet(T, d["k"])
+        return d
+
+    rows[:] = [chuan(r) for r in rows]
+    so_asin_kw = {r["keyword"]: r.get("so_asin", 1) for r in rows}
+    rieng = {}   # dòng của từng ASIN (đã phân sheet), cho bước 3.2 và tầng 1
+    for a in asins:
+        if theo_asin and a in theo_asin:
+            ky = theo_asin[a].get("period_used")
+            rieng[a] = [{**chuan(x, a, ky), "so_asin": so_asin_kw.get(x["keyword"], 1)} for x in theo_asin[a]["rows"]]
         else:
-            r["sheet"] = None   # Function / Seasonal, chia sau
+            rieng[a] = [r for r in rows if a in (r.get("cac_asin") or [r["asin"]])]
+
+    def khoi_tu(sheet: str, ds_theo_asin: dict) -> list:
+        """Function / Occasion: một khối cho mỗi từ công năng / dịp lễ có kw."""
+        out = []
+        for w in TU_KHOI[sheet]:
+            per = {}
+            for a, ds in ds_theo_asin.items():
+                c = [d for d in ds if d["sheet"] == sheet and d["tu"] == w and not d["neg"] and d["rank"] is not None]
+                if c:
+                    m = min(c, key=lambda d: (d["rank"], -(d["sv"] or 0)))
+                    per[a] = {"rank": m["rank"], "kw": m["keyword"]}
+            out.append({"ten": w, "per": per, "so_asin": len(per), "nhom": NA - len(per) + 1 if per else None,
+                        "rank": min((p["rank"] for p in per.values()), default=None), "vi_du": None, "sv_root": 0, "tu": True})
+        return out
 
     ket = {}
-    for sheet, goc in GOC.items():
+    for sheet in THU_TU_SHEET:
         rs = [r for r in rows if r["sheet"] == sheet]
-        # 3.1 + 3.2: rút biến thể từ kw gốc rank 1–50 (không negative) trong file của TỪNG ASIN
-        nguon = []
-        for a in asins:
-            if theo_asin and a in theo_asin:
-                ky = theo_asin[a].get("period_used")
-                for x in theo_asin[a]["rows"]:
-                    T = tach(x["keyword"])
-                    k = " ".join(T)
-                    ok = ky in mien_loc or (x["rank"] is not None and x["rank"] >= rank_min and (x["sv"] or 0) >= sv_min)
-                    thuoc = hit("ornament", T) if goc == "ornament" else (not hit("ornament", T) and hit("gift", T))
-                    if ok and thuoc and x["rank"] is not None and x["rank"] <= rank_root and not find_neg(k, T, neg, target_year):
-                        nguon.append((a, x["rank"], x["sv"] or 0, x["keyword"], _chuan_tok(T, vocab)))
-            else:
-                nguon += [(a, r["rank"], r["sv"] or 0, r["keyword"], r["N"]) for r in rs
-                          if a in (r.get("cac_asin") or [r["asin"]]) and r["rank"] is not None and r["rank"] <= rank_root and not r["neg"]]
-        bt = {}
-        for a, rank, sv, kw, N in sorted(nguon, key=lambda x: (x[1], -x[2])):
-            con = [t for t in N if t not in CHUNG and not hit(goc, [t]) and not re.fullmatch(r"20\d\d", t)]
-            if not con:
-                continue
-            ten = " ".join(dict.fromkeys(con))
-            v = bt.setdefault(ten, {"ten": ten, "per": {b: None for b in asins}, "vi_du": kw, "sv_root": sv})
-            if v["per"][a] is None:
-                v["per"][a] = {"rank": rank, "kw": kw}
-        for v in bt.values():
-            co = [p for p in v["per"].values() if p]
-            v["so_asin"] = len(co)
-            v["nhom"] = NA - len(co) + 1
-            v["rank"] = min(p["rank"] for p in co)
-        thu_tu = sorted(bt.values(), key=_bac2)
-        # 5: mỗi kw vào biến thể đầu tiên khớp theo thứ tự lọc
-        for r in rs:
-            r["var"] = None
-            if r["neg"]:
-                r["khoi"] = "Loại bỏ (negative)"
-                continue
-            v = next((v for v in thu_tu if _thuoc(v["ten"], r["N"])), None)
-            r["var"] = v["ten"] if v else None
-            r["khoi"] = r["var"] or "chưa phân loại"
+        if sheet in GOC:
+            nguon = [(a, d["rank"], d["sv"] or 0, d["keyword"], d["N"]) for a in asins for d in rieng[a]
+                     if d["sheet"] == sheet and d["rank"] is not None and d["rank"] <= rank_root and not d["neg"]]
+            bt = _rut_bien_the(nguon, GOC[sheet], rank_root)
+            for v in bt.values():
+                v["per"] = {a: v["per"].get(a) for a in asins}
+                co = [p for p in v["per"].values() if p]
+                v["so_asin"], v["nhom"], v["rank"] = len(co), NA - len(co) + 1, min(p["rank"] for p in co)
+            thu_tu = sorted(bt.values(), key=_bac2)
+            _gom(rs, thu_tu)
+        else:
+            for r in rs:
+                r["var"] = r["tu"] if r["tu"] != "chưa phân loại" else None
+                r["khoi"] = "Loại bỏ (negative)" if r["neg"] else r["tu"]
+            thu_tu = khoi_tu(sheet, rieng)
+            for v in thu_tu:
+                v["per"] = {a: v["per"].get(a) for a in asins}
         for v in thu_tu:
-            b = [r for r in rs if r["var"] == v["ten"]]
+            b = [r for r in rs if r["khoi"] == v["ten"]]
             v["so_kw"], v["sv"] = len(b), sum(r["sv"] or 0 for r in b)
-        ket[sheet] = thu_tu
-
+        ket[sheet] = [v for v in thu_tu if v["so_kw"] or sheet in GOC]
     for r in rows:
-        if r["sheet"] is not None:
-            if r["sheet"] == "Ngoai bo loc":
-                r["khoi"], r["var"] = "Ngoài bộ lọc", None
-            continue
-        r["var"] = None
-        T, k = r["T"], r["k"]
-        fw = next((w for w in FUNC_WORDS if phrase_hit(w, k, T)), None)
-        sw = next((w for w in SEASON_WORDS if phrase_hit(w, k, T)), None)
-        r["sheet"], r["khoi"] = ("FUNCTION", fw) if fw else ("Seasonal", sw) if sw else ("FUNCTION", "chưa phân loại")
-        if r["neg"]:
-            r["khoi"] = "Loại bỏ (negative)"
+        if r["sheet"] == "Ngoai bo loc":
+            r["khoi"], r["var"] = "Ngoài bộ lọc", None
+
     # Tầng 1: từng ASIN đối thủ có biến thể nào (rank tốt nhất trong chính ASIN đó), rồi gom kw CỦA ASIN ĐÓ
     # vào các biến thể của nó theo cùng rule lọc.
     tung = {}
-    so_asin_kw = {r["keyword"]: r.get("so_asin", 1) for r in rows}
     for a in (asins if theo_asin else []):
-        ky = theo_asin[a].get("period_used")
-        ds = []
-        for x in theo_asin[a]["rows"]:
-            T = tach(x["keyword"])
-            d = {**x, "asin": a, "ky": ky, "T": T, "k": " ".join(T), "N": _chuan_tok(T, vocab),
-                 "so_asin": so_asin_kw.get(x["keyword"], 1)}
-            d["neg"] = find_neg(d["k"], T, neg, target_year)
-            ok = ky in mien_loc or (x["rank"] is not None and x["rank"] >= rank_min and (x["sv"] or 0) >= sv_min)
-            d["sheet"] = ("Ngoai bo loc" if not ok else "KW PRODUCT" if hit("ornament", T)
-                          else "KW GIFTS" if hit("gift", T) else "khac")
-            ds.append(d)
+        ds = rieng[a]
         cua = {}
-        for sheet, goc in GOC.items():
+        for sheet in THU_TU_SHEET:
             rs = [d for d in ds if d["sheet"] == sheet]
-            vs = {}
-            for d in sorted([d for d in rs if d["rank"] is not None and d["rank"] <= rank_root and not d["neg"]],
-                            key=lambda d: (d["rank"], -(d["sv"] or 0))):
-                con = [t for t in d["N"] if t not in CHUNG and not hit(goc, [t]) and not re.fullmatch(r"20\d\d", t)]
-                if con:
-                    ten = " ".join(dict.fromkeys(con))
-                    vs.setdefault(ten, {"ten": ten, "rank": d["rank"], "root": d["keyword"], "nhom": 1, "sv_root": d["sv"] or 0})
-            order = sorted(vs.values(), key=_bac2)
-            for d in rs:
-                v = None if d["neg"] else next((v for v in order if _thuoc(v["ten"], d["N"])), None)
-                d["khoi"] = "Loại bỏ (negative)" if d["neg"] else (v["ten"] if v else "chưa phân loại")
+            if sheet in GOC:
+                nguon = [(a, d["rank"], d["sv"] or 0, d["keyword"], d["N"]) for d in rs
+                         if d["rank"] is not None and d["rank"] <= rank_root and not d["neg"]]
+                order = []
+                for v in _rut_bien_the(nguon, GOC[sheet], rank_root).values():
+                    p0 = v["per"][a]
+                    order.append({"ten": v["ten"], "rank": p0["rank"], "root": p0["kw"], "nhom": 1, "sv_root": v["sv_root"]})
+                order.sort(key=_bac2)
+                _gom(rs, order)
+            else:
+                for d in rs:
+                    d["khoi"] = "Loại bỏ (negative)" if d["neg"] else d["tu"]
+                order = [{"ten": v["ten"], "rank": (v["per"].get(a) or {}).get("rank"), "root": (v["per"].get(a) or {}).get("kw"),
+                          "nhom": 1, "sv_root": 0, "tu": True} for v in khoi_tu(sheet, {a: ds})]
             for v in order:
                 b = [d for d in rs if d["khoi"] == v["ten"]]
                 v["so_kw"], v["sv"] = len(b), sum(d["sv"] or 0 for d in b)
-            cua[sheet] = order
-        tung[a] = {"ky": ky, "rows": ds, "bien_the": cua}
+            cua[sheet] = [v for v in order if v["so_kw"]] if sheet not in GOC else order
+        tung[a] = {"ky": theo_asin[a].get("period_used"), "rows": ds, "bien_the": cua}
     return {"bien_the": ket, "rows": rows, "NA": NA, "asins": asins, "tung_asin": tung}
 
 
+def _rk(v: dict) -> float:
+    return v["rank"] if v["rank"] is not None else 9e9
+
+
 def xep_uu_tien(ket: dict, danh_gia: dict, loai: set) -> tuple[list, list]:
-    """Tầng 3: biến thể cho sản phẩm của mình. Product trước rồi mới đến Gift (như thứ tự chia sheet); trong mỗi
+    """Tầng 3: biến thể cho sản phẩm của mình. Product → Function → Gift → Occasion (như thứ tự chia sheet); trong mỗi
     loại xếp gần → xa: nhiều ASIN đối thủ dùng chung trước, cùng số ASIN thì rank tốt nhất nhỏ hơn trước
     (vd 3/3 ASIN rank 1 → 3/3 rank 2 → … → 2/3 rank 1 …). Biến thể có nhãn trong `loai` bị loại ra riêng."""
     chon, bo = [], []
     for sheet, ds in ket.items():
         for v in ds:
+            if not v["so_kw"]:
+                continue
             x = {**v, "sheet": sheet, "nhan": danh_gia.get(v["ten"], "")}
             (bo if x["nhan"] in loai else chon).append(x)
-    thu_tu_sheet = {s: i for i, s in enumerate(GOC)}
-    chon.sort(key=lambda v: (thu_tu_sheet[v["sheet"]], -v["so_asin"], v["rank"], -v["sv"]))
-    bo.sort(key=lambda v: (thu_tu_sheet[v["sheet"]], -v["so_asin"], v["rank"]))
+    thu_tu_sheet = {s: i for i, s in enumerate(THU_TU_SHEET)}
+    chon.sort(key=lambda v: (thu_tu_sheet[v["sheet"]], -v["so_asin"], _rk(v), -v["sv"]))
+    bo.sort(key=lambda v: (thu_tu_sheet[v["sheet"]], -v["so_asin"], _rk(v)))
     return chon, bo
+
+
+TEN_SHEET = {"KW PRODUCT": "Product", "FUNCTION": "Function", "KW GIFTS": "Gift", "Seasonal": "Occasion"}
+
+
+def _bac_ten(v: dict, sheet: str) -> str:
+    if sheet == "FUNCTION":
+        return "từ công năng"
+    if sheet == "Seasonal":
+        return "dịp lễ"
+    return ["nhiều từ", "1 từ cụ thể", "1 từ rộng"][_bac2(v)[0]]
+
+
+def _root(v: dict) -> str | None:
+    co = [p for p in v["per"].values() if p]
+    return min(co, key=lambda p: p["rank"])["kw"] if co else None
 
 
 def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia: dict | None = None,
@@ -537,9 +587,10 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
     for a, ta in res.get("tung_asin", {}).items():
         ws = wb.create_sheet(f"1. {a}")
         dau(ws)
-        for sheet in ("KW PRODUCT", "KW GIFTS"):
-            ds = sorted(ta["bien_the"][sheet], key=lambda v: (v["rank"], -v["sv"]))
-            muc(ws, f"{a} · kỳ {KY.get(ta['ky'], ta['ky'])} · {sheet}: {len(ds)} biến thể (rút từ kw chứa '{GOC[sheet]}' rank 1–50 của ASIN này)")
+        for sheet in THU_TU_SHEET:
+            ds = sorted(ta["bien_the"][sheet], key=lambda v: (_rk(v), -v["sv"]))
+            muc(ws, f"{a} · kỳ {KY.get(ta['ky'], ta['ky'])} · {TEN_SHEET[sheet]}: {len(ds)} " +
+                (f"biến thể (rút từ kw chứa '{GOC[sheet]}' rank 1–50 của ASIN này)" if sheet in GOC else "khối"))
             rs = [d for d in ta["rows"] if d["sheet"] == sheet]
             for v in ds:
                 b = [d for d in rs if d["khoi"] == v["ten"]]
@@ -555,17 +606,17 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
     for sheet, ds in res["bien_the"].items():
         if wv.max_row > 1:
             wv.append([])
-        wv.append([f"{sheet}: biến thể xếp theo số ASIN dùng chung (nhiều → ít), rồi rank tốt nhất"])
+        wv.append([f"{TEN_SHEET[sheet]}: xếp theo số ASIN dùng chung (nhiều → ít), rồi rank tốt nhất"])
         wv.cell(wv.max_row, 1).font = Font(bold=True, size=12)
         wv.append(["Biến thể", "Số ASIN dùng", "Nhóm", "Rank tốt nhất"] + [f"Rank {a}" for a in asins] +
                   ["Tổng SV", "Số kw", "So với sản phẩm", "Bậc lọc", "Root (kw rank tốt nhất)"])
         for c in wv[wv.max_row]:
             c.font = B
-        for v in sorted(ds, key=lambda v: (-v["so_asin"], v["rank"], -v["sv"])):
+        for v in sorted(ds, key=lambda v: (-v["so_asin"], _rk(v), -v["sv"])):
             wv.append([v["ten"], f"{v['so_asin']}/{NA}", f"Nhóm {v['nhom']}", v["rank"]] +
                       [(v["per"][a] or {}).get("rank") for a in asins] +
-                      [v["sv"], v["so_kw"], danh_gia.get(v["ten"], ""), ["nhiều từ", "1 từ cụ thể", "1 từ rộng"][_bac2(v)[0]],
-                       min((p for p in v["per"].values() if p), key=lambda p: p["rank"])["kw"]])
+                      [v["sv"], v["so_kw"], danh_gia.get(v["ten"], ""), _bac_ten(v, sheet),
+                       _root(v)])
     for col, w in zip("ABCDEFGHIJKLM", (28, 12, 9, 12) + (14,) * NA + (10, 8, 18, 12, 40)):
         wv.column_dimensions[col].width = w
 
@@ -576,26 +627,26 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
     muc_cu = None
     for i, v in enumerate(chon, 1):
         v["thu_tu"] = i
-        if v["so_asin"] != muc_cu:
-            muc(ws, f"Dùng ở {v['so_asin']}/{NA} ASIN đối thủ · xếp theo rank tốt nhất (nhỏ trước)")
-            muc_cu = v["so_asin"]
+        if v["sheet"] != muc_cu:
+            muc(ws, f"{TEN_SHEET[v['sheet']]} · số ASIN dùng chung nhiều trước, rồi rank tốt nhất nhỏ trước")
+            muc_cu = v["sheet"]
         b = [r for r in rows if r["sheet"] == v["sheet"] and r["khoi"] == v["ten"]]
-        khoi(ws, f"{v['thu_tu']}. {v['ten']}  ({'Product' if v['sheet'] == 'KW PRODUCT' else 'Gift'})", b,
-             f"{v['so_asin']}/{NA} ASIN · rank tốt nhất {v['rank']}" + (f" · {v['nhan']}" if v["nhan"] else ""), F_V, rank=v["rank"])
+        khoi(ws, f"{v['ten']}  ({TEN_SHEET[v['sheet']]})", b,
+             f"{v['so_asin']}/{NA} ASIN · rank tốt nhất {v['rank'] if v['rank'] is not None else '—'}" + (f" · {v['nhan']}" if v["nhan"] else ""), F_V, rank=v["rank"])
     if bo:
         muc(ws, "Loại: biến thể không sát sản phẩm")
         for v in bo:
             b = [r for r in rows if r["sheet"] == v["sheet"] and r["khoi"] == v["ten"]]
-            khoi(ws, f"{v['ten']}  ({'Product' if v['sheet'] == 'KW PRODUCT' else 'Gift'})", b,
+            khoi(ws, f"{v['ten']}  ({TEN_SHEET[v['sheet']]})", b,
                  f"{v['so_asin']}/{NA} ASIN · rank tốt nhất {v['rank']} · {v['nhan']}", F_X, rank=v["rank"])
 
     # ---- Bảng chia đủ (kiểm mỗi kw đúng 1 lần)
-    for sheet in ("KW PRODUCT", "KW GIFTS", "FUNCTION", "Seasonal"):
-        ws = wb.create_sheet(sheet)
+    for sheet in THU_TU_SHEET:
+        ws = wb.create_sheet(TEN_SHEET[sheet].upper())
         dau(ws)
         rs = [r for r in rows if r["sheet"] == sheet]
-        if sheet in res["bien_the"]:
-            for v in sorted(res["bien_the"][sheet], key=lambda v: (-v["so_asin"], v["rank"], -v["sv"])):
+        if sheet in GOC:
+            for v in sorted(res["bien_the"][sheet], key=lambda v: (-v["so_asin"], _rk(v), -v["sv"])):
                 b = [r for r in rs if r["khoi"] == v["ten"]]
                 if b:
                     nhan = danh_gia.get(v["ten"])
@@ -642,7 +693,7 @@ def ket_qua_json(res: dict, danh_gia: dict | None = None, loai: set | None = Non
         cac = {}
         for sheet, ds in ta["bien_the"].items():
             cac[sheet] = [{"ten": v["ten"], "rank": v["rank"], "root": v["root"], "so_kw": v["so_kw"], "sv": v["sv"],
-                           "kw": khoi(ta["rows"], sheet, v["ten"])} for v in sorted(ds, key=lambda v: (v["rank"], -v["sv"]))]
+                           "kw": khoi(ta["rows"], sheet, v["ten"])} for v in sorted(ds, key=lambda v: (_rk(v), -v["sv"]))]
             for kh in ("chưa phân loại", "Loại bỏ (negative)"):
                 kw = khoi(ta["rows"], sheet, kh)
                 if kw:
@@ -652,9 +703,9 @@ def ket_qua_json(res: dict, danh_gia: dict | None = None, loai: set | None = Non
 
     so_sanh = {sheet: [{"ten": v["ten"], "so_asin": v["so_asin"], "nhom": v["nhom"], "rank": v["rank"],
                         "per": {a: (v["per"][a] or {}).get("rank") for a in asins}, "sv": v["sv"], "so_kw": v["so_kw"],
-                        "bac": ["nhiều từ", "1 từ cụ thể", "1 từ rộng"][_bac2(v)[0]], "nhan": danh_gia.get(v["ten"], ""),
-                        "root": min((p for p in v["per"].values() if p), key=lambda p: p["rank"])["kw"]}
-                       for v in sorted(ds, key=lambda v: (-v["so_asin"], v["rank"], -v["sv"]))]
+                        "bac": _bac_ten(v, sheet), "nhan": danh_gia.get(v["ten"], ""),
+                        "root": _root(v)}
+                       for v in sorted(ds, key=lambda v: (-v["so_asin"], _rk(v), -v["sv"]))]
                for sheet, ds in res["bien_the"].items()}
 
     chon, bo = xep_uu_tien(res["bien_the"], danh_gia, loai)
