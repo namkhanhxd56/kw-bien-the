@@ -298,3 +298,21 @@ label[data-denied] { pointer-events: none; }
   .vb .vr { padding-left: 0; }
   .tab-body { padding: 12px; }
 }
+
+/* ---------- dòng thông báo extension (bao.js) */
+.bao { padding: 8px 24px; font-size: 13px; border-bottom: 1px solid var(--line); }
+.bao.bad { background: var(--bad-soft); color: #8a221d; }
+.bao.warn { background: var(--warn-soft); color: #6d4600; }
+
+/* ---------- chọn keyword (trang /kw-list) */
+th.ck, td.ck { width: 34px; padding-right: 0; }
+td.ck input, th.ck input { width: 16px; height: 16px; cursor: pointer; vertical-align: middle; }
+.chon-bar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px 8px 16px; background: var(--primary); color: #fff; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  font-size: 13px; max-width: calc(100vw - 32px); flex-wrap: wrap; }
+.chon-bar[hidden] { display: none; }
+.chon-bar .btn { background: #fff; }
+.chon-bar .btn.danger { color: var(--bad); border-color: #fff; }
+.toast-btn { margin-left: 8px; border: 1px solid rgba(255,255,255,.6); background: transparent; color: inherit; border-radius: 5px; padding: 2px 8px; font: inherit; cursor: pointer; }
+/* Khi thanh chọn keyword đang hiện, đẩy toast lên trên để không che nhau */
+body:has(.chon-bar:not([hidden])) .toast { bottom: 76px; }

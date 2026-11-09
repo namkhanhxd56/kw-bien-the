@@ -75,6 +75,7 @@ ROUTES = [
     ("POST", r"/api/lists/[^/]+/(fetch|cancel|upload)", "kw.edit", "edit"),
     ("POST", r"/api/lists/[^/]+/lark-link", "kw.lark", "edit"),
     ("POST", r"/api/lists/[^/]+/bien-the/nhan", "kw.edit", "edit"),
+    ("POST", r"/api/lists/[^/]+/xoa", "kw.edit", "edit"),
 ]
 _ROUTES = [(m, re.compile(p), c, n) for m, p, c, n in ROUTES]
 MAC_DINH = ("kw.view", "view")

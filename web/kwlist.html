@@ -6,6 +6,7 @@
 <title>Bộ keyword</title>
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/authui.js"></script>
+<script src="/static/bao.js" defer></script>
 </head>
 <body>
 <header class="topbar">
@@ -14,6 +15,12 @@
 <main class="main"><div class="main-inner" id="root">
   <div class="card section"><div class="section-body"><div class="skeleton" style="height:22px;width:40%"></div><div class="skeleton" style="height:14px;width:60%;margin-top:10px"></div></div></div>
 </div></main>
+<div class="chon-bar" id="chon-bar" hidden>
+  <span>Đã chọn <b id="chon-so">0</b> keyword</span>
+  <button class="btn sm" type="button" id="chon-chep">Sao chép</button>
+  <button class="btn sm danger" type="button" id="chon-xoa" data-cap="kw.edit" data-need="edit">Xoá khỏi bộ</button>
+  <button class="btn sm" type="button" id="chon-bo">Bỏ chọn</button>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -32,8 +39,17 @@ let tab = (location.hash.slice(1) || "chon").replace(/^asin-.*/, "asin"), asinCh
 if (!TABS.some(([k]) => k === tab)) tab = "chon";
 let moHet = false;
 let KHOI = [];   // keyword của từng khối đang hiện, để nút "Sao chép" lấy ra (không chép tên biến thể)
+const CHON = new Set();   // keyword đang tích chọn (giữ qua các lần vẽ lại)
 
-function toast(m, bad) { const t = $("#toast"); t.textContent = m; t.className = "toast show" + (bad ? " bad" : ""); clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", 2500); }
+function toast(m, bad, hanh) {
+  const t = $("#toast"); t.textContent = m; t.className = "toast show" + (bad ? " bad" : "");
+  if (hanh) {   // nút hành động trong toast (vd Hoàn tác), giữ lâu hơn để kịp bấm
+    const b = Object.assign(document.createElement("button"), { type: "button", className: "toast-btn", textContent: hanh.ten });
+    b.onclick = () => { t.className = "toast"; hanh.lam(); };
+    t.append(" ", b);
+  }
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", hanh ? 8000 : 2500);
+}
 
 async function load() {
   try {
@@ -47,6 +63,49 @@ async function load() {
   } catch (e) {
     $("#root").innerHTML = `<div class="card empty"><h3>Không mở được bộ keyword</h3><p>${esc(e.message)}</p><a class="btn" href="/">Về trang chính</a></div>`;
   }
+}
+
+async function taiLai() {   // sau khi xoá / khôi phục: đọc lại bộ + biến thể, vẽ lại, giữ tab đang xem
+  const r = await fetch("/api/lists/" + encodeURIComponent(slug));
+  const d = await r.json();
+  if (r.ok && d.ok) { L = d.list; await loadBT(); render(); }
+}
+
+async function xoaKw(kws, khoiPhuc) {
+  try {
+    const r = await fetch(`/api/lists/${encodeURIComponent(slug)}/xoa`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keywords: kws, khoi_phuc: khoiPhuc || false }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || "Không lưu được");
+    if (!khoiPhuc) kws.forEach(k => CHON.delete(k));
+    await taiLai();
+    if (khoiPhuc) toast(`Đã khôi phục ${d.doi} keyword`);
+    else toast(`Đã xoá ${d.doi} keyword khỏi bộ`, false, { ten: "Hoàn tác", lam: () => xoaKw(kws, true) });
+  } catch (e) { toast(e.message, true); }
+}
+
+function capNhatChon() {
+  const bar = $("#chon-bar");
+  $("#chon-so").textContent = fmt(CHON.size);
+  bar.hidden = !CHON.size;
+  document.querySelectorAll("input[data-ca]").forEach(h => {   // ô tích "cả khối" ở tiêu đề bảng
+    const kws = h.dataset.ca === "bang" ? rowsView().slice(0, view.shown).map(r => r.keyword) : KHOI[+h.dataset.ca].kw;
+    const n = kws.filter(k => CHON.has(k)).length;
+    h.checked = n > 0 && n === kws.length; h.indeterminate = n > 0 && n < kws.length;
+  });
+}
+
+function ganChon(root) {
+  root.querySelectorAll("input[data-kw]").forEach(c => c.addEventListener("change", () => {
+    c.checked ? CHON.add(c.dataset.kw) : CHON.delete(c.dataset.kw); capNhatChon();
+  }));
+  root.querySelectorAll("input[data-ca]").forEach(h => h.addEventListener("change", () => {
+    const kws = h.dataset.ca === "bang" ? rowsView().slice(0, view.shown).map(r => r.keyword) : KHOI[+h.dataset.ca].kw;
+    kws.forEach(k => h.checked ? CHON.add(k) : CHON.delete(k));
+    root.querySelectorAll("input[data-kw]").forEach(c => { c.checked = CHON.has(c.dataset.kw); });
+    capNhatChon();
+  }));
+  capNhatChon();
 }
 
 async function loadBT() {
@@ -140,6 +199,7 @@ function renderTab() {
   if (tab === "chon") renderChon(el);
   else if (tab === "so-sanh") renderSoSanh(el);
   else renderTungAsin(el);
+  ganChon(el);
   el.querySelectorAll("[data-chep]").forEach(b => b.addEventListener("click", e => {
     e.preventDefault(); e.stopPropagation();   // không gập/mở khối
     const k = KHOI[+b.dataset.chep];
@@ -158,10 +218,12 @@ function chonNhan(ten, nhan) {
     <option value="">Chưa đánh giá</option>${BT.nhan_chon.map(n => `<option ${n === nhan ? "selected" : ""}>${n}</option>`).join("")}</select>`;
 }
 
-function bangKw(kw) {
+const oChon = k => `<td class="ck"><input type="checkbox" data-kw="${esc(k)}" ${CHON.has(k) ? "checked" : ""} aria-label="Chọn ${esc(k)}"></td>`;
+
+function bangKw(kw, i) {
   return `<div class="table-wrap"><table>
-    <thead><tr><th>Keyword</th><th class="num">Search volume</th><th class="num">Trend</th><th class="num">Organic rank</th><th>ASIN nguồn</th><th class="num">Số ASIN có</th><th>Kỳ</th><th>Lý do loại</th></tr></thead>
-    <tbody>${kw.map(r => `<tr><td class="kw">${esc(r.keyword)}</td><td class="num">${fmt(r.sv)}</td><td class="num">${r.trend == null ? "—" : r.trend + "%"}</td>
+    <thead><tr><th class="ck"><input type="checkbox" data-ca="${i}" aria-label="Chọn cả khối"></th><th>Keyword</th><th class="num">Search volume</th><th class="num">Trend</th><th class="num">Organic rank</th><th>ASIN nguồn</th><th class="num">Số ASIN có</th><th>Kỳ</th><th>Lý do loại</th></tr></thead>
+    <tbody>${kw.map(r => `<tr>${oChon(r.keyword)}<td class="kw">${esc(r.keyword)}</td><td class="num">${fmt(r.sv)}</td><td class="num">${r.trend == null ? "—" : r.trend + "%"}</td>
       <td class="num">${fmt(r.rank)}</td><td class="mono">${r.asin}</td><td class="num">${r.so_asin}/${BT.NA}</td><td>${KY[r.ky] || "—"}</td>
       <td class="small" style="white-space:normal">${esc((r.neg || []).join("; "))}</td></tr>`).join("")}</tbody></table></div>`;
 }
@@ -177,7 +239,7 @@ function khoi({ ten, tag, nhan, kw, cls, chinh = true, soAsin, rank }) {
       <span class="vm">${nhan !== undefined ? chonNhan(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
       ${duoi ? `<span class="vr">${duoi}</span>` : ""}
     </summary>
-    ${kw.length ? bangKw(kw) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
+    ${kw.length ? bangKw(kw, i) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
   </details>`;
 }
 
@@ -241,7 +303,12 @@ function renderTatCa(el) {
       <label class="row small"><input type="checkbox" id="f-orn" ${view.orn ? "checked" : ""}> Chỉ keyword có "ornament"</label>
       <span class="small muted">Mỗi keyword giữ dòng có organic rank tốt nhất; hoà rank thì lấy search volume cao hơn.</span>
     </div>
+    ${(L.da_xoa || []).length ? `<details class="vb phu" style="margin-bottom:10px"><summary><span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">Đã xoá ${L.da_xoa.length} keyword khỏi bộ</span></span>
+      <span class="vm"><button type="button" class="btn sm" id="khoi-phuc-het" data-cap="kw.edit" data-need="edit">Khôi phục tất cả</button></span></summary>
+      <div class="small" style="padding:10px 12px;white-space:normal">${L.da_xoa.map(esc).join(" · ")}</div></details>` : ""}
     <div id="tbl"></div>`;
+  const kp = $("#khoi-phuc-het");
+  if (kp) kp.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); xoaKw([], "het"); });
   $("#f-q").addEventListener("input", e => { view.q = e.target.value; view.shown = PAGE; renderTable(); });
   $("#f-asin").addEventListener("change", e => { view.asin = e.target.value; view.shown = PAGE; renderTable(); });
   $("#f-orn").addEventListener("change", e => { view.orn = e.target.checked; view.shown = PAGE; renderTable(); });
@@ -257,8 +324,8 @@ function renderTable() {
   const th = (k, l, num) => `<th class="sort ${num ? "num" : ""}" data-k="${k}" aria-sort="${view.sort === k ? (view.dir > 0 ? "ascending" : "descending") : "none"}">${l}${view.sort === k ? (view.dir > 0 ? " ↑" : " ↓") : ""}</th>`;
   $("#tbl").innerHTML = `
     <div class="table-wrap"><table>
-      <thead><tr>${th("keyword", "Keyword")}${th("sv", "Search volume", 1)}${th("trend", "Trend", 1)}${th("rank", "Organic rank", 1)}<th>ASIN nguồn</th>${th("so_asin", "Số ASIN có", 1)}<th>Kỳ</th></tr></thead>
-      <tbody>${rs.slice(0, view.shown).map(r => `<tr>
+      <thead><tr><th class="ck"><input type="checkbox" data-ca="bang" aria-label="Chọn các keyword đang hiện"></th>${th("keyword", "Keyword")}${th("sv", "Search volume", 1)}${th("trend", "Trend", 1)}${th("rank", "Organic rank", 1)}<th>ASIN nguồn</th>${th("so_asin", "Số ASIN có", 1)}<th>Kỳ</th></tr></thead>
+      <tbody>${rs.slice(0, view.shown).map(r => `<tr>${oChon(r.keyword)}
         <td class="kw">${esc(r.keyword)}</td><td class="num">${fmt(r.sv)}</td><td class="num">${r.trend == null ? "—" : r.trend + "%"}</td>
         <td class="num">${fmt(r.rank)}</td><td class="mono">${r.asin}</td><td class="num">${r.so_asin}/${L.asins.length}</td><td>${KY[r.ky] || "—"}</td></tr>`).join("")}</tbody>
     </table></div>
@@ -270,7 +337,13 @@ function renderTable() {
     const k = h.dataset.k; view.dir = view.sort === k ? -view.dir : (k === "keyword" || k === "rank" ? 1 : -1); view.sort = k; renderTable();
   });
   const m = $("#more"); if (m) m.onclick = () => { view.shown += PAGE; renderTable(); };
+  ganChon($("#tbl"));
+  AUTHUI.apply($("#root"));
 }
+
+$("#chon-chep").onclick = () => chep([...CHON], "keyword đã chọn");
+$("#chon-bo").onclick = () => { CHON.clear(); document.querySelectorAll("input[data-kw]").forEach(c => { c.checked = false; }); capNhatChon(); };
+$("#chon-xoa").onclick = () => xoaKw([...CHON]);
 
 // Đọc quyền trước rồi mới vẽ: vẽ trước thì nút sửa bị mờ oan (lúc đó chưa biết quyền)
 AUTHUI.boot().finally(load);

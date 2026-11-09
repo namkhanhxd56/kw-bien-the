@@ -24,6 +24,9 @@ HOST=127.0.0.1 PORT=8796 python3 -u server.py
    - **So sánh ASIN:** số ASIN dùng chung từng biến thể và rank ở từng ASIN.
    - **Chọn cho sản phẩm:** xếp số ASIN dùng chung nhiều trước, cùng số ASIN thì rank tốt nhất nhỏ trước. Nhãn Sát / Xa / Không hợp sửa ngay trên trang (lưu ở `data/lists/<bộ>/danh_gia.json`); "Không hợp" bị loại.
 
+   Ô tích đầu mỗi keyword: chọn tay để sao chép hoặc **xoá khỏi bộ** (lưu ở `data/lists/<bộ>/da_xoa.json`, có Hoàn tác
+   và Khôi phục ở tab Tất cả keyword); keyword đã xoá không còn trong biến thể, sao chép, CSV.
+
    Negative mặc định ở `cau-hinh/neg-mac-dinh.json`; bộ nào cần riêng (negative, nhãn ban đầu, năm) thì thêm `cau-hinh/<Mã nội bộ>.json` (vd `BSV627.json`).
 
 ## Extension Cerebro (`extension/`)
@@ -48,8 +51,11 @@ nhận về. Không dùng API/MCP của H10, không đọc token; file Export b�
    (danh sách `phrase`), không bám đường dẫn. Kỳ hiện tại bấm Clear trước để bỏ bộ lọc H10 còn lưu.
    Bộ lấy lấy JSON đó, lọc SV ≥ 50 (`impressionExact30`) và organic rank ≥ 1 (`organicPosition`).
 
-Mỗi job gửi nhật ký từng bước về `/api/agent/capture` (`kind: "job-log"`, kèm giao diện lúc lỗi) để soát.
-Cerebro báo hết lượt thì extension tự tắt "Nhận job". Chế độ "Soi Cerebro" trong popup ghi lại thao tác tay
+Job chạy lần lượt, mỗi lần 1 ASIN. Một job lỗi thì extension đóng tab, mở tab mới chạy lại 1 lần (không tốn thêm
+lượt tìm: Cerebro hiện "đã tìm trước đó" và bộ lấy mở lại lượt vừa tạo); vẫn lỗi thì báo lỗi job đó và làm job kế tiếp.
+H10 đăng xuất: job trả về hàng đợi (`…/release`, hoàn lượt), extension dừng nhận job tới khi đăng nhập lại; tool hiện
+một dòng thông báo (`web/bao.js`). Cerebro báo hết lượt thì extension tự tắt "Nhận job".
+Mỗi lần chạy gửi nhật ký từng bước về `/api/agent/capture` (`kind: "job-log"`, kèm giao diện lúc lỗi) để soát. Chế độ "Soi Cerebro" trong popup ghi lại thao tác tay
 và request khi H10 đổi giao diện cần soi lại.
 
 Cách chạy một job:
@@ -65,6 +71,7 @@ Cách chạy một job:
 | `GET /api/agent/next` | Lấy job kế tiếp → `{job: {id, asin, attempt, filters: {period: "2025-12" \| "current", exclude_variations, search_volume_min, organic_rank_min}}}` hoặc `{job: null}`. Mỗi job tính 1 lượt H10 (`DAILY_LIMIT`, mặc định 60/ngày) |
 | `POST /api/agent/jobs/<id>/result` | Body `{period_used, rows: [{keyword, search_volume, search_volume_trend, organic_rank}]}`. `rows` rỗng ở kỳ 2025-12 thì server tự xếp lại job với kỳ hiện tại |
 | `POST /api/agent/jobs/<id>/fail` | Body `{error}` |
+| `POST /api/agent/jobs/<id>/release` | H10 đăng xuất giữa chừng: trả job về hàng đợi, hoàn lượt |
 | `POST /api/agent/capture` | Body `{items: [...]}`: request do chế độ "Ghi lại" bắt được |
 
 - Header: `X-Agent-Token` (nếu không đặt `AGENT_TOKEN` thì server chỉ nhận từ localhost), `X-Agent-Version`, `X-Agent-H10` (`ok`/`logged_out`/`unknown`), `X-Agent-Ready`, `X-Agent-Running`. Thanh trên cùng của tool hiển thị các trạng thái này.

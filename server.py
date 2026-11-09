@@ -120,15 +120,29 @@ def trang_thai_asin(slug: str, asins: list[str]) -> list[dict]:
     return out
 
 
+def da_xoa(slug: str) -> list[str]:
+    """Keyword người dùng đã bỏ khỏi bộ (ô tích → Xoá), lưu theo bộ; khôi phục được."""
+    return store._read(store.list_dir(slug) / "da_xoa.json", [])
+
+
+def du_lieu_bo(meta: dict) -> tuple[dict, list[dict], dict]:
+    """Dữ liệu từng ASIN và dòng đã gộp của một bộ, đã bỏ các keyword người dùng xoá."""
+    bo = {k.lower() for k in da_xoa(meta["slug"])}
+    data = {}
+    for a, d in store.all_asin_data(meta["slug"], meta.get("asins") or []).items():
+        data[a] = {**d, "rows": [r for r in d.get("rows") or [] if r["keyword"].lower() not in bo]}
+    rows, stats = cerebro.gop(data)
+    return data, rows, stats
+
+
 def tom_tat_bo(meta: dict, kem_dong: bool = False) -> dict:
     asins = trang_thai_asin(meta["slug"], meta.get("asins") or [])
     out = {**meta, "link": link_bo(meta["slug"]), "trang_thai_asin": asins,
            "so_xong": sum(1 for a in asins if a["trang_thai"] in ("xong", "rong"))}
     if kem_dong:
-        data = store.all_asin_data(meta["slug"], meta.get("asins") or [])
-        rows, stats = cerebro.gop(data)
+        data, rows, stats = du_lieu_bo(meta)
         ky = {d["period_used"] for d in data.values() if d["rows"]}
-        out.update(rows=rows, stats=stats, ky_tron=len(ky) > 1)
+        out.update(rows=rows, stats=stats, ky_tron=len(ky) > 1, da_xoa=da_xoa(meta["slug"]))
     return out
 
 
@@ -146,8 +160,8 @@ def cau_hinh(ma: str) -> dict:
 def tinh_bien_the(meta: dict) -> dict:
     """Chia biến thể 3 tầng (engine.chia_nhom) cho một bộ keyword, nhãn người dùng sửa đè lên nhãn cấu hình."""
     slug = meta["slug"]
-    data = {a: d for a, d in store.all_asin_data(slug, meta.get("asins") or []).items() if d.get("rows")}
-    rows, stats = cerebro.gop(data)
+    data, rows, stats = du_lieu_bo(meta)
+    data = {a: d for a, d in data.items() if d.get("rows")}
     ch = cau_hinh(meta["ma"])
     dg = {**ch["danh_gia"], **store._read(store.list_dir(slug) / "danh_gia.json", {})}
     asins = [a for a in meta.get("asins") or [] if a in data]
@@ -286,9 +300,12 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.fullmatch(r"/api/lists/([^/]+)/bien-the/nhan", path)
                 if m:
                     return self._dat_nhan(m.group(1))
+                m = re.fullmatch(r"/api/lists/([^/]+)/xoa", path)
+                if m:
+                    return self._xoa_kw(m.group(1))
                 if path == "/api/agent/capture":
                     return self._agent_capture()
-                m = re.fullmatch(r"/api/agent/jobs/([a-f0-9]+)/(result|fail)", path)
+                m = re.fullmatch(r"/api/agent/jobs/([a-f0-9]+)/(result|fail|release)", path)
                 if m:
                     return self._agent_report(m.group(1), m.group(2))
             return self._err(404, "Không có đường dẫn này")
@@ -432,6 +449,27 @@ class Handler(BaseHTTPRequestHandler):
         store._write(f, dg)
         self._json(tinh_bien_the(meta))
 
+    def _xoa_kw(self, slug: str):
+        # Bỏ keyword khỏi bộ ({keywords}), hoặc khôi phục ({keywords, khoi_phuc: true}; khoi_phuc "het" = tất cả)
+        meta = store.get_list(slug)
+        if not meta:
+            return self._err(404, "Chưa có bộ keyword này")
+        b = self._jbody()
+        kws = [str(k).strip() for k in b.get("keywords") or [] if str(k).strip()]
+        cu = da_xoa(slug)
+        if b.get("khoi_phuc") == "het":
+            moi = []
+        elif b.get("khoi_phuc"):
+            bo = {k.lower() for k in kws}
+            moi = [k for k in cu if k.lower() not in bo]
+        else:
+            if not kws:
+                raise ValueError("Chưa chọn keyword nào")
+            co = {k.lower() for k in cu}
+            moi = cu + [k for k in dict.fromkeys(kws) if k.lower() not in co]
+        store._write(store.list_dir(slug) / "da_xoa.json", moi)
+        self._json({"ok": True, "da_xoa": moi, "doi": abs(len(moi) - len(cu))})
+
     def _lark_link(self, slug: str):
         meta = store.get_list(slug)
         if not meta:
@@ -448,6 +486,7 @@ class Handler(BaseHTTPRequestHandler):
             "h10": self.headers.get("X-Agent-H10", "unknown"),
             "san_sang": self.headers.get("X-Agent-Ready", "") == "1",
             "nhan_job": nhan_job,
+            "loi": unquote(self.headers.get("X-Agent-Loi", ""))[:300] or None,   # lỗi mới nhất extension đang báo
         }
 
     def _agent_ping(self):
@@ -500,6 +539,11 @@ class Handler(BaseHTTPRequestHandler):
         j = jobs.get(job_id)
         if not j:
             return self._err(404, "Không có job này")
+        if kind == "release":
+            # H10 đăng xuất giữa chừng: trả job về hàng đợi, hoàn lượt, chạy lại khi đăng nhập
+            store.update_job(job_id, status="queued", started_at=None, error=str(b.get("error") or "")[:300])
+            store.add_usage(-1)
+            return self._json({"ok": True})
         if kind == "fail":
             store.update_job(job_id, status="failed", error=str(b.get("error") or "Không rõ lỗi")[:500],
                              finished_at=time.time())
