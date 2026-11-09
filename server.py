@@ -305,6 +305,7 @@ class Handler(BaseHTTPRequestHandler):
         seen = store.agent_seen
         self._json({
             "ok": True, "bo_loc": BO_LOC, "public_url": PUBLIC_URL,
+            "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None,   # bản đang chạy trên Railway
             "agent": {"online": time.time() - seen < 90, "last_seen": seen or None, **store.agent_info},
             "luot_hom_nay": store.usage_today(), "gioi_han_ngay": DAILY_LIMIT,
             "hang_doi": store.queue_size(), "luu_tru": luu_tru(), "capture": tom_tat_capture(),
