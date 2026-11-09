@@ -38,7 +38,9 @@ nhận về. Không dùng API/MCP của H10, không đọc token; file Export b�
    (lượt kỳ hiện tại ngay sau lượt 12/2025 rỗng thì bấm "Load from…", không tốn lượt).
 3. Kỳ 12/2025: ô Time Period (`placeholder="Current"`) chọn Dec 2025 → `[data-testid=applyfilters]`.
    Bộ lấy kiểm `periodFrom` trong request `search/history` trang gửi đi; sai kỳ thì báo lỗi, không ghi.
-4. `[data-testid=exportdata]` → CSV/XLSX: trang tải `…/export/` (JSON toàn bộ dòng) rồi mới dựng file.
+4. `[data-testid=exportdata]` → CSV/XLSX: trang tải JSON toàn bộ dòng rồi mới dựng file
+   (kỳ cũ: `…/history/<id>/export/`; kỳ hiện tại: `…/single/<id>/exported-data`). Bộ lấy nhận theo nội dung
+   (danh sách `phrase`), không bám đường dẫn. Kỳ hiện tại bấm Clear trước để bỏ bộ lọc H10 còn lưu.
    Bộ lấy lấy JSON đó, lọc SV ≥ 50 (`impressionExact30`) và organic rank ≥ 1 (`organicPosition`).
 
 Mỗi job gửi nhật ký từng bước về `/api/agent/capture` (`kind: "job-log"`, kèm giao diện lúc lỗi) để soát.
