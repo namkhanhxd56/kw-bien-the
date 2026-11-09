@@ -132,16 +132,31 @@ async function tick() {
   }
 }
 
+// Mở trang tìm mới của Cerebro trước mỗi job (sau job trước, tab còn ở trang /view/<id>)
+async function veTrangTim(tabId) {
+  await chrome.tabs.update(tabId, { url: ADAPTER.cerebroUrl });
+  await new Promise(r => setTimeout(r, 1500));
+  await choTabTai(tabId);
+}
+
 async function chayJob(tabId, job) {
   await datSt({ phase: "running", job: { id: job.id, asin: job.asin, period: job.filters.period, start: Date.now() }, error: null });
   const giuThuc = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);   // giữ service worker sống
+  let kq = null;
   try {
-    const kq = await Promise.race([
-      chayTrongTab(tabId, ADAPTER.run, [job.asin, job.filters]),
-      new Promise((_, loi) => setTimeout(() => loi(new Error("Cerebro chạy quá 8 phút")), HET_GIO_JOB)),
-    ]);
+    await veTrangTim(tabId);
+    if (await chayTrongTab(tabId, laTrangDangNhap)) {
+      kq = { ok: false, login: true, error: "H10 chưa đăng nhập trên Chrome này" };
+    } else {
+      kq = await Promise.race([
+        chayTrongTab(tabId, ADAPTER.run, [job.asin, { ...job.filters, attempt: job.attempt }]),
+        new Promise((_, loi) => setTimeout(() => loi(new Error("Cerebro chạy quá 8 phút")), HET_GIO_JOB)),
+      ]);
+    }
     if (!kq?.ok) {
       if (kq?.login) await datSt({ h10: "logged_out", h10At: Date.now() });
+      // Hết lượt Cerebro: dừng nhận job, không thử lại vô ích
+      if (kq?.het_luot) await chrome.storage.local.set({ running: false });
       throw new Error(kq?.error || "Bộ lấy Cerebro không trả kết quả");
     }
     const d = await api(`/api/agent/jobs/${job.id}/result`, { method: "POST", body: { period_used: kq.period_used, rows: kq.rows } });
@@ -149,9 +164,15 @@ async function chayJob(tabId, job) {
   } catch (e) {
     const msg = String(e.message || e);
     await api(`/api/agent/jobs/${job.id}/fail`, { method: "POST", body: { error: msg } }).catch(() => {});
-    await datSt({ phase: "error", job: null, error: msg, last: { asin: job.asin, loi: msg, at: Date.now() } });
+    await datSt({ phase: kq?.het_luot ? "limit" : "error", job: null, error: msg, last: { asin: job.asin, loi: msg, at: Date.now() } });
   } finally {
     clearInterval(giuThuc);
+    // Nhật ký từng bước (và giao diện lúc lỗi) gửi về tool để soát / sửa bộ lấy
+    api("/api/agent/capture", { method: "POST", body: { items: [{
+      kind: "job-log", job: job.id, asin: job.asin, period: job.filters.period, attempt: job.attempt,
+      ok: !!kq?.ok, error: kq?.error || null, period_used: kq?.period_used || null, so: kq?.rows?.length ?? null,
+      log: kq?.log || [], debug: kq?.debug || null, adapter: ADAPTER.version, t: Date.now(),
+    }] } }).catch(() => {});
   }
 }
 

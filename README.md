@@ -28,13 +28,21 @@ Cerebro trong một tab `members.helium10.com` mở nền bằng phiên đăng n
 **Cài:** mở `chrome://extensions`, bật Developer mode, bấm "Load unpacked", chọn thư mục `KW-Bien-The/extension`.
 Bấm biểu tượng extension để mở popup: xem trạng thái, bật/tắt nhận job, đổi địa chỉ tool.
 
-**Tình trạng:** phần nhận job, kiểm tra đăng nhập, gửi kết quả, chuyển kỳ đã chạy thử. **Bộ lấy Cerebro
-(`adapter.js`) chưa viết** vì chưa biết request thật của Cerebro. Khi `ADAPTER.ready = false`, extension chỉ
-báo còn sống, không nhận job nên không tốn lượt. Để dò API:
+**Cách làm (cách C của Dearmine):** extension thao tác giao diện Cerebro như người và đọc JSON mà chính trang
+nhận về. Không dùng API/MCP của H10, không đọc token; file Export bị chặn không tải về máy. Luồng soi tay
+09/11/2026 (`data/capture/`), dữ liệu đi qua `h10api.pacvue.com/rta/cerebro/v1/…`:
 
-1. Trong popup bật "Ghi lại request Cerebro".
-2. Chạy Cerebro tay 1 lần cho 1 ASIN: kỳ 12/2025, Exclude variations, SV ≥ 50, Organic rank ≥ 1, rồi lật trang và bấm Export.
-3. Tắt "Ghi lại". Request (đã ẩn cookie, token, csrf) nằm ở `data/capture/<ngày>.jsonl`; từ đó viết `adapter.js`.
+1. Nhập ASIN vào ô "Enter a keyword…" (trang gọi `validate-asin`), tick `[data-testid=excludevariations]`.
+2. Bấm `[data-testid=getkeywords]`; đã tìm trước đó thì bấm `[data-testid=runnewsearch]`
+   (lượt kỳ hiện tại ngay sau lượt 12/2025 rỗng thì bấm "Load from…", không tốn lượt).
+3. Kỳ 12/2025: ô Time Period (`placeholder="Current"`) chọn Dec 2025 → `[data-testid=applyfilters]`.
+   Bộ lấy kiểm `periodFrom` trong request `search/history` trang gửi đi; sai kỳ thì báo lỗi, không ghi.
+4. `[data-testid=exportdata]` → CSV/XLSX: trang tải `…/export/` (JSON toàn bộ dòng) rồi mới dựng file.
+   Bộ lấy lấy JSON đó, lọc SV ≥ 50 (`impressionExact30`) và organic rank ≥ 1 (`organicPosition`).
+
+Mỗi job gửi nhật ký từng bước về `/api/agent/capture` (`kind: "job-log"`, kèm giao diện lúc lỗi) để soát.
+Cerebro báo hết lượt thì extension tự tắt "Nhận job". Chế độ "Soi Cerebro" trong popup ghi lại thao tác tay
+và request khi H10 đổi giao diện cần soi lại.
 
 Cách chạy một job:
 

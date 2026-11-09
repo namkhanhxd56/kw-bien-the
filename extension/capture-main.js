@@ -35,11 +35,39 @@
     window.postMessage({ __kwbt: "capture", item }, location.origin);
   }
 
+  // Sổ dữ liệu cho bộ lấy Cerebro (adapter.js): giữ nguyên văn phản hồi Cerebro mà chính trang nhận về.
+  // Luôn bật, chỉ nằm trong RAM của tab, không gửi đi đâu.
+  const SO_RE = /\/rta\/|validate-asin|uses-remaining/;
+  window.__kwbtNet = [];
+  function ghiSo(item) {
+    const a = window.__kwbtNet;
+    a.push(item);
+    if (a.length > 80) a.shift();
+  }
+
+  // Chặn file Export tải về máy khi bộ lấy đang chạy (dữ liệu đã có trong sổ ở trên)
+  const laFileTai = a => a instanceof HTMLAnchorElement && (a.hasAttribute("download") || /^(blob|data):/i.test(a.href));
+  const aClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    if (window.__kwbtChanTai && laFileTai(this)) { window.__kwbtDaChan = (window.__kwbtDaChan || 0) + 1; return; }
+    return aClick.apply(this, arguments);
+  };
+  const goDispatch = EventTarget.prototype.dispatchEvent;
+  EventTarget.prototype.dispatchEvent = function (ev) {
+    if (window.__kwbtChanTai && ev && ev.type === "click" && laFileTai(this)) { window.__kwbtDaChan = (window.__kwbtDaChan || 0) + 1; return true; }
+    return goDispatch.apply(this, arguments);
+  };
+
   const goc = window.fetch;
   window.fetch = async function (input, init) {
     const url = tuyetDoi(typeof input === "string" || input instanceof URL ? input : input.url);
     const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+    const t0 = Date.now();
     const res = await goc.apply(this, arguments);
+    if (SO_RE.test(url)) {
+      res.clone().text().then(body => ghiSo({ method, url, t: t0, status: res.status, req_body: bodyText(init?.body), body }))
+        .catch(() => ghiSo({ method, url, t: t0, status: res.status, req_body: bodyText(init?.body), body: null }));
+    }
     if (canGhi(url)) {
       const item = { kind: "fetch", method, url, req_headers: headerNames(init?.headers || (input instanceof Request ? input.headers : null)),
         req_body: cat(anBody(bodyText(init?.body) ?? ""), MAX_REQ), status: res.status, res_type: res.headers.get("content-type") || "" };
@@ -60,6 +88,15 @@
   };
   XMLHttpRequest.prototype.send = function (body) {
     const m = this.__kwbt;
+    if (m && SO_RE.test(m.url)) {
+      const t0 = Date.now();
+      this.addEventListener("loadend", () => {
+        let t = null;
+        try { t = this.responseType === "" || this.responseType === "text" ? this.responseText : this.responseType === "json" ? JSON.stringify(this.response) : null; }
+        catch { /* bỏ qua */ }
+        ghiSo({ method: m.method, url: m.url, t: t0, status: this.status, req_body: bodyText(body), body: t });
+      });
+    }
     if (m && canGhi(m.url)) {
       this.addEventListener("loadend", () => {
         let t;
