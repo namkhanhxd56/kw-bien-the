@@ -59,6 +59,15 @@ MAX_UPLOAD = 30 * 1024 * 1024
 
 store = Store(DATA)
 
+
+def luu_tru() -> dict:
+    """Dữ liệu có nằm trên volume không. Không có volume thì mỗi lần deploy Railway là mất hết."""
+    vol = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "").rstrip("/")
+    tren_vol = bool(vol) and (str(DATA) == vol or str(DATA).startswith(vol + "/"))
+    return {"data_dir": str(DATA), "volume": vol or None,
+            "volume_name": os.environ.get("RAILWAY_VOLUME_NAME") or None,
+            "tren_volume": tren_vol, "la_diem_gan": os.path.ismount(DATA)}
+
 BO_LOC = {
     "period": KY_CHINH,
     "period_fallback": KY_HIEN_TAI,
@@ -248,7 +257,7 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True, "bo_loc": BO_LOC, "public_url": PUBLIC_URL,
             "agent": {"online": time.time() - seen < 90, "last_seen": seen or None, **store.agent_info},
             "luot_hom_nay": store.usage_today(), "gioi_han_ngay": DAILY_LIMIT,
-            "hang_doi": store.queue_size(),
+            "hang_doi": store.queue_size(), "luu_tru": luu_tru(),
         })
 
     def _products(self, refresh: bool):
@@ -436,6 +445,10 @@ def main():
     print(f"KW Biến Thể chạy ở http://{HOST}:{PORT}  ·  link bộ keyword: {PUBLIC_URL}/kw-list/<tên bộ>\n"
           f"  auth    : {'bro-auth ' + auth.BASE_URL if auth.enabled() else 'TẮT' + (' (chỉ chạy ở máy)' if HOST in auth.LOOPBACK else ', không cần đăng nhập')}\n"
           f"  lark    : {lark.BACKEND}  ·  dữ liệu: {DATA}", flush=True)
+    lt = luu_tru()
+    if os.environ.get("RAILWAY_ENVIRONMENT") and not lt["tren_volume"]:
+        print(f"  CẢNH BÁO: {DATA} không nằm trên volume (volume: {lt['volume']}) → deploy lại là mất dữ liệu",
+              flush=True)
     srv.serve_forever()
 
 
