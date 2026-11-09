@@ -144,8 +144,9 @@ async function select(ma, keepScroll) {
   const bo = p.bo;
   S.draft = {
     asins: bo ? [...bo.asins] : [...p.asin_doi_thu],
-    niche: bo ? bo.niche : (p.niche || "").toLowerCase(),
-    product: bo ? bo.product : (/ornament/i.test(p.ten_mau) ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
+    // Lark chưa có niche thì tạm lấy tên mẫu, không chặn việc lấy keyword (đủ ≥ 3 ASIN là chạy)
+    niche: bo ? bo.niche : (p.niche || p.ten_mau || "").toLowerCase(),
+    product: bo ? bo.product : (/ornament/i.test(p.ten_mau) || !p.ten_mau ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
   };
   renderDetail();
   if (!keepScroll) window.scrollTo(0, 0);
@@ -302,7 +303,7 @@ function renderS2() {
     ${warn.map(w => `<div class="note warn">${w}</div>`).join("")}
 
     <div class="form-grid">
-      <div class="field"><label for="in-niche">Niche của bộ keyword</label><input class="input" id="in-niche" value="${esc(d.niche)}"><span class="hint">Lấy theo kết luận ảnh ở bước 1 nếu khác Lark</span></div>
+      <div class="field"><label for="in-niche">Niche của bộ keyword</label><input class="input" id="in-niche" value="${esc(d.niche)}"><span class="hint">Lấy theo kết luận ảnh ở bước 1 nếu khác Lark; để trống vẫn chạy được</span></div>
       <div class="field"><label for="in-product">Loại sản phẩm</label><input class="input" id="in-product" value="${esc(d.product)}"><span class="hint">vd: ornament</span></div>
       <div class="field full"><label>Tên bộ keyword</label>
         <div class="linkbox"><span class="url" id="pv-link">${esc(t.link)}</span><span class="badge" id="pv-ten">${esc(t.ten)}</span></div>
@@ -311,7 +312,7 @@ function renderS2() {
 
     <div class="row end">
       ${bo && !daTao ? '<span class="small muted">Đã đổi ASIN hoặc tên so với bộ đã tạo</span>' : ""}
-      <button class="btn primary" id="btn-fetch" data-cap="kw.edit" data-need="edit" ${d.asins.length < 3 || !d.niche.trim() ? "disabled" : ""}>${bo ? "Lưu & lấy keyword còn thiếu" : "Tạo bộ & lấy keyword"}</button>
+      <button class="btn primary" id="btn-fetch" data-cap="kw.edit" data-need="edit" ${d.asins.length < 3 ? "disabled" : ""}>${bo ? "Lưu & lấy keyword còn thiếu" : "Tạo bộ & lấy keyword"}</button>
     </div>
     <div id="bo-box">${bo ? boHtml(bo) : ""}</div>`;
 
@@ -330,7 +331,7 @@ function renderS2() {
   for (const k of ["niche", "product"]) $("#in-" + k).addEventListener("input", e => {
     S.draft[k] = e.target.value; const t = tenBo();
     $("#pv-link").textContent = t.link; $("#pv-ten").textContent = t.ten;
-    $("#btn-fetch").disabled = S.draft.asins.length < 3 || !S.draft.niche.trim();
+    $("#btn-fetch").disabled = S.draft.asins.length < 3;   // đủ ≥ 3 ASIN là cho chạy, không đòi niche
   });
   $("#btn-fetch").addEventListener("click", createAndFetch);
   bindBo();
