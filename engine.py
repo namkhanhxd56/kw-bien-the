@@ -3,13 +3,15 @@ Chia biến thể + phân loại keyword (bước 3) — khung PDF "Quy trình l
 nhom final" + lớp negative của bản kwfinal (bật/tắt, dòng dính negative tách khối, không xoá).
 
   1. Bộ lọc chuẩn: organic rank >= RANK_MIN và SV >= SV_MIN. Dòng ngoài bộ lọc để sheet riêng.
+     Dòng kỳ hiện tại (ASIN không có keyword ở 12/2025, tức sản phẩm mới) được miễn lọc.
   2. Biến thể rút từ kw chứa "ornament", rank 1–50, bỏ "ornament" + từ phụ → phần còn lại.
      Người/AI chốt danh sách (config). Nhóm 1/2/3 = có ở N / N-1 / N-2 ASIN.
   3. Thứ tự lọc (waterfall): biến thể nhiều từ trước (3 từ → 2 từ), rồi 1 từ cụ thể, rồi 1 từ
      rộng; cùng bậc thì Nhóm 1 → 2 → 3; cùng nhóm thì rank tốt hơn trước.
   4. Tách: Product (có ornament) → Gift (có gift) → Function (từ công năng) → Seasonal (dịp lễ)
      → còn lại vào khối "chưa phân loại" của Function.
-  5. Product/Gift chia khối theo biến thể; Function chia theo từ công năng; Seasonal theo dịp lễ.
+  5. Product/Gift chia khối theo biến thể (mỗi sheet một danh sách: root Product từ kw có ornament, root
+     Gift từ kw có gift); Function chia theo từ công năng; Seasonal theo dịp lễ.
      Trong khối xếp organic rank tăng dần, hoà thì SV cao trước.
 """
 
@@ -103,42 +105,34 @@ def assign(k: str, T, order: list[dict]) -> str | None:
 
 
 def chay(rows: list[dict], asins: list[str], variants: list[dict], neg: dict, *,
-         sv_min=50, rank_min=1, rank_root=50, target_year="2026", neg_on=True) -> dict:
-    """rows: dòng đã gộp (keyword, sv, trend, rank, asin, cac_asin). variants: config đã chốt."""
+         sv_min=50, rank_min=1, rank_root=50, target_year="2026", neg_on=True,
+         mien_loc=("current",)) -> dict:
+    """rows: dòng đã gộp (keyword, sv, trend, rank, asin, cac_asin, ky). variants: config đã chốt.
+    mien_loc: kỳ dữ liệu không áp bộ lọc SV/rank (kỳ hiện tại = sản phẩm mới)."""
     NA = len(asins)
     for r in rows:
         r["T"] = toks(r["keyword"])
         r["k"] = " ".join(r["T"])
-        r["trong_loc"] = r["rank"] is not None and r["rank"] >= rank_min and (r["sv"] or 0) >= sv_min
+        r["trong_loc"] = r.get("ky") in mien_loc or (
+            r["rank"] is not None and r["rank"] >= rank_min and (r["sv"] or 0) >= sv_min)
         r["neg"] = find_neg(r["k"], r["T"], neg, target_year) if neg_on else []
 
-    # rank tốt nhất của biến thể trong từng ASIN (kw ornament, rank 1–50, không negative)
-    order = sorted(variants, key=bac)
-    for _ in range(5):
-        for r in rows:
-            r["var"] = assign(r["k"], r["T"], order)
-        for v in order:
-            per = {}
-            for a in asins:
-                c = [r for r in rows if r["var"] == v["name"] and a in r.get("cac_asin", [r["asin"]])
-                     and r["trong_loc"] and r["rank"] <= rank_root and hit(ROOT, r["T"]) and not r["neg"]]
-                c.sort(key=lambda r: (r["rank"], -(r["sv"] or 0)))
-                per[a] = {"rank": c[0]["rank"], "root": c[0]["keyword"]} if c else None
-            v["per"] = per
-            cnt = sum(1 for a in asins if per[a])
-            v["so_asin"] = cnt
-            v["nhom"] = (NA - cnt + 1) if cnt else None
-            best = [p for p in per.values() if p]
-            v["rank"] = min(p["rank"] for p in best) if best else None
-            v["root"] = min(best, key=lambda p: p["rank"])["root"] if best else None
-        new = sorted(variants, key=bac)
-        if [v["name"] for v in new] == [v["name"] for v in order]:
-            break
-        order = new
-    bo = [v["name"] for v in order if not v["nhom"]]
-    order = [v for v in order if v["nhom"]]
+    # Danh sách biến thể riêng cho từng sheet (PDF: Gift có danh sách biến thể riêng). Root của biến thể
+    # Product lấy từ kw có "ornament", của Gift lấy từ kw có "gift" mà không có "ornament".
+    la_product = lambda r: hit(ROOT, r["T"])
+    la_gift = lambda r: not hit(ROOT, r["T"]) and hit("gift", r["T"])
+    order, bo = _xep(rows, asins, variants, la_product, rank_root)
+    order_gift, bo_gift = _xep(rows, asins, variants, la_gift, rank_root)
+    for v in order_gift:
+        v["root_tu"] = "Gift"
+    # Biến thể không có root ở kw quà nhưng có root bên Product: vẫn dùng cho Gift, mượn thứ hạng Product
+    co = {v["name"] for v in order_gift}
+    order_gift = sorted(order_gift + [{**v, "root_tu": "Product"} for v in order if v["name"] not in co], key=bac)
+    bo_gift = [n for n in bo_gift if n not in {v["name"] for v in order_gift}]
+    for v in order:
+        v["root_tu"] = "Product"
     for r in rows:
-        r["var"] = assign(r["k"], r["T"], order)
+        r["var"] = assign(r["k"], r["T"], order_gift if la_gift(r) else order)
 
     # tách sheet
     for r in rows:
@@ -160,7 +154,38 @@ def chay(rows: list[dict], asins: list[str], variants: list[dict], neg: dict, *,
                 r["sheet"], r["khoi"] = "FUNCTION", "chưa phân loại"
         if r["neg"] and r["trong_loc"]:
             r["khoi"] = "Loại bỏ (negative)"
-    return {"order": order, "bo": bo, "rows": rows, "NA": NA, "asins": asins}
+    return {"order": order, "bo": bo, "order_gift": order_gift, "bo_gift": bo_gift,
+            "rows": rows, "NA": NA, "asins": asins}
+
+
+def _xep(rows: list[dict], asins: list[str], variants: list[dict], la_goc, rank_root: int):
+    """Xếp thứ tự lọc cho một sheet: rank tốt nhất của biến thể trong từng ASIN, chỉ tính kw gốc của sheet
+    (la_goc), trong bộ lọc, rank 1–rank_root, không negative. Biến thể không có root ở ASIN nào bị bỏ."""
+    NA = len(asins)
+    vs = [dict(v) for v in variants]
+    order = sorted(vs, key=bac)
+    for _ in range(5):
+        gan = {id(r): assign(r["k"], r["T"], order) for r in rows}
+        for v in order:
+            per = {}
+            for a in asins:
+                c = [r for r in rows if gan[id(r)] == v["name"] and a in r.get("cac_asin", [r["asin"]])
+                     and r["trong_loc"] and r["rank"] is not None and r["rank"] <= rank_root
+                     and la_goc(r) and not r["neg"]]
+                c.sort(key=lambda r: (r["rank"], -(r["sv"] or 0)))
+                per[a] = {"rank": c[0]["rank"], "root": c[0]["keyword"]} if c else None
+            v["per"] = per
+            cnt = sum(1 for a in asins if per[a])
+            v["so_asin"] = cnt
+            v["nhom"] = (NA - cnt + 1) if cnt else None
+            best = [p for p in per.values() if p]
+            v["rank"] = min(p["rank"] for p in best) if best else None
+            v["root"] = min(best, key=lambda p: p["rank"])["root"] if best else None
+        new = sorted(vs, key=bac)
+        if [v["name"] for v in new] == [v["name"] for v in order]:
+            break
+        order = new
+    return [v for v in order if v["nhom"]], [v["name"] for v in order if not v["nhom"]]
 
 
 def xuat_xlsx(res: dict, path: str, ten: str, tom_tat: list[list]) -> dict:
@@ -174,7 +199,8 @@ def xuat_xlsx(res: dict, path: str, ten: str, tom_tat: list[list]) -> dict:
     COLS = ["Keyword Phrase", "Search Volume", "Search Volume Trend", "Organic Rank", "ASIN nguồn",
             "Biến thể khớp", "Lý do loại"]
     order, rows, NA = res["order"], res["rows"], res["NA"]
-    nhom = {v["name"]: v["nhom"] for v in order}
+    order_gift = res.get("order_gift", order)
+    nhom = {"KW PRODUCT": {v["name"]: v["nhom"] for v in order}, "KW GIFTS": {v["name"]: v["nhom"] for v in order_gift}}
     written = {}
 
     wb = Workbook()
@@ -212,19 +238,24 @@ def xuat_xlsx(res: dict, path: str, ten: str, tom_tat: list[list]) -> dict:
     t.column_dimensions["B"].width = 120
 
     wv = wb.create_sheet("BIEN THE")
-    wv.append(["Thứ tự lọc", "Biến thể", "Bậc", "Nhóm", "Số ASIN có", "Rank tốt nhất", "Root"] +
-              [f"Rank {a}" for a in res["asins"]] + ["Từ khớp", "Loại trừ"])
-    for c in wv[1]:
-        c.font = Font(bold=True)
-    for i, v in enumerate(order, 1):
-        b = bac(v)[0]
-        wv.append([i, v["name"], ["nhiều từ", "1 từ cụ thể", "1 từ rộng"][b], f"Nhóm {v['nhom']}",
-                   f"{v['so_asin']}/{NA}", v["rank"], v["root"]] +
-                  [(v["per"][a] or {}).get("rank") for a in res["asins"]] +
-                  [" ; ".join(v["words"]), ", ".join(v.get("exclude", []))])
-    if res["bo"]:
-        wv.append([])
-        wv.append(["", "Không có root rank 1–50 (bị bỏ):", ", ".join(res["bo"])])
+    for tieu_de, ds, bo in [("KW PRODUCT (root = kw có ornament)", order, res["bo"]),
+                            ("KW GIFTS (root = kw có gift, không có ornament; không có thì mượn Product)", order_gift, res.get("bo_gift", []))]:
+        if wv.max_row > 1:
+            wv.append([])
+        wv.append([tieu_de])
+        wv.cell(wv.max_row, 1).font = Font(bold=True, size=12)
+        wv.append(["Thứ tự lọc", "Biến thể", "Bậc", "Nhóm", "Số ASIN có", "Rank tốt nhất", "Root", "Root từ"] +
+                  [f"Rank {a}" for a in res["asins"]] + ["Từ khớp", "Loại trừ"])
+        for c in wv[wv.max_row]:
+            c.font = Font(bold=True)
+        for i, v in enumerate(ds, 1):
+            b = bac(v)[0]
+            wv.append([i, v["name"], ["nhiều từ", "1 từ cụ thể", "1 từ rộng"][b], f"Nhóm {v['nhom']}",
+                       f"{v['so_asin']}/{NA}", v["rank"], v["root"], v.get("root_tu", "")] +
+                      [(v["per"][a] or {}).get("rank") for a in res["asins"]] +
+                      [" ; ".join(v["words"]), ", ".join(v.get("exclude", []))])
+        if bo:
+            wv.append(["", "Không có root rank 1–50 (bị bỏ):", ", ".join(bo)])
     for col, w in zip("ABCDEFG", [10, 22, 12, 9, 11, 13, 40]):
         wv.column_dimensions[col].width = w
 
@@ -233,11 +264,11 @@ def xuat_xlsx(res: dict, path: str, ten: str, tom_tat: list[list]) -> dict:
         head(ws)
         rs = [r for r in rows if r["sheet"] == sheet]
         if sheet in ("KW PRODUCT", "KW GIFTS"):
-            keys = [v["name"] for v in order]
+            keys = [v["name"] for v in (order if sheet == "KW PRODUCT" else order_gift)]
             for kname in keys:
                 b = [r for r in rs if r["khoi"] == kname]
                 if b:
-                    banner(ws, f"{kname} — Nhóm {nhom[kname]} — {vol(b)}", F_T)
+                    banner(ws, f"{kname} — Nhóm {nhom[sheet][kname]} — {vol(b)}", F_T)
                     put(ws, b)
         else:
             words = FUNC_WORDS if sheet == "FUNCTION" else SEASON_WORDS
