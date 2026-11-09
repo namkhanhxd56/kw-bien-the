@@ -2,7 +2,7 @@
 Chia biến thể + phân loại keyword (bước 3) — khung PDF "Quy trình lọc KW ornament ra chia
 nhom final" + lớp negative của bản kwfinal (bật/tắt, dòng dính negative tách khối, không xoá).
 
-  1. Bộ lọc chuẩn: organic rank >= RANK_MIN và SV >= SV_MIN. Dòng ngoài bộ lọc để sheet riêng.
+  1. Bộ lọc chuẩn: organic rank trong [RANK_MIN, RANK_MAX] và SV >= SV_MIN. Dòng ngoài bộ lọc để sheet riêng.
      Dòng kỳ hiện tại (ASIN không có keyword ở 12/2025, tức sản phẩm mới) được miễn lọc.
   2. Biến thể rút từ kw chứa "ornament", rank 1–50, bỏ "ornament" + từ phụ → phần còn lại.
      Người/AI chốt danh sách (config). Nhóm 1/2/3 = có ở N / N-1 / N-2 ASIN.
@@ -383,7 +383,7 @@ def _gom(rs: list, thu_tu: list) -> None:
 
 
 def chia_nhom(rows: list[dict], asins: list[str], neg: dict, *, theo_asin: dict | None = None, sv_min=50, rank_min=1,
-              rank_root=50, target_year="2026", mien_loc=("current",)) -> dict:
+              rank_max=100, rank_root=50, target_year="2026", mien_loc=("current",)) -> dict:
     """rows: kw đã gộp (để chia khối). theo_asin: {asin: {"rows": [...], "period_used": ...}} dữ liệu Cerebro riêng
     từng ASIN, dùng cho bước 3.2 (rank tốt nhất của biến thể TRONG từng ASIN); thiếu thì suy từ dòng gộp.
     Sheet theo thứ tự Product → Function → Gift → Occasion. Product / Gift: biến thể rút từ dữ liệu (kw chứa
@@ -402,7 +402,8 @@ def chia_nhom(rows: list[dict], asins: list[str], neg: dict, *, theo_asin: dict 
         if a is not None:
             d.update(asin=a, ky=ky)
         ky = d.get("ky")
-        d["trong_loc"] = ky in mien_loc or (d["rank"] is not None and d["rank"] >= rank_min and (d["sv"] or 0) >= sv_min)
+        d["trong_loc"] = ky in mien_loc or (d["rank"] is not None and rank_min <= d["rank"] <= rank_max
+                                            and (d["sv"] or 0) >= sv_min)
         d["neg"] = find_neg(d["k"], T, neg, target_year)
         d["sheet"], d["tu"] = ("Ngoai bo loc", None) if not d["trong_loc"] else phan_sheet(T, d["k"])
         return d

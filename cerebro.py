@@ -145,7 +145,7 @@ def doc_file(data: bytes, ten_file: str) -> list[dict]:
     return out
 
 
-def kiem_bo_loc(rows: list[dict], sv_min: int, rank_min: int) -> list[str]:
+def kiem_bo_loc(rows: list[dict], sv_min: int, rank_min: int, rank_max: int | None = None) -> list[str]:
     """Cảnh báo khi file không khớp bộ lọc chuẩn (SV, organic rank)."""
     canh_bao = []
     sv_thap = sum(1 for r in rows if r["sv"] is None or r["sv"] < sv_min)
@@ -154,6 +154,10 @@ def kiem_bo_loc(rows: list[dict], sv_min: int, rank_min: int) -> list[str]:
         canh_bao.append(f"{sv_thap} dòng có Search Volume dưới {sv_min}")
     if khong_rank:
         canh_bao.append(f"{khong_rank} dòng không có organic rank (hoặc < {rank_min})")
+    if rank_max is not None:
+        qua = sum(1 for r in rows if r["rank"] is not None and r["rank"] > rank_max)
+        if qua:
+            canh_bao.append(f"{qua} dòng có organic rank > {rank_max}")
     return canh_bao
 
 

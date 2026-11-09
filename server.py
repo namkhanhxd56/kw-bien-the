@@ -19,7 +19,7 @@ Biến môi trường:
   LARK_APP_ID / LARK_APP_SECRET   có thì đọc Lark bằng Open API (khi deploy), không thì lark-cli
   BRO_AUTH_URL / BRO_AUTH_API_KEY đăng nhập + phân quyền (auth.py)
   DAILY_LIMIT       số lượt Cerebro tối đa mỗi ngày (mặc định 60)
-  SV_MIN / RANK_MIN bộ lọc chuẩn (mặc định 50 / 1)
+  SV_MIN / RANK_MIN / RANK_MAX  bộ lọc chuẩn (mặc định SV ≥ 50, organic rank 1–100)
   LARK_BASE, LARK_TABLE, LARK_VIEW, LARK_FLOW_TABLE   xem lark.py
 """
 
@@ -58,6 +58,7 @@ AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "").strip()
 DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "60"))
 SV_MIN = int(os.environ.get("SV_MIN", "50"))
 RANK_MIN = int(os.environ.get("RANK_MIN", "1"))
+RANK_MAX = int(os.environ.get("RANK_MAX", "100"))
 MAX_UPLOAD = 30 * 1024 * 1024
 
 store = Store(DATA)
@@ -87,6 +88,7 @@ BO_LOC = {
     "exclude_variations": True,
     "search_volume_min": SV_MIN,
     "organic_rank_min": RANK_MIN,
+    "organic_rank_max": RANK_MAX,
     "mot_asin_mot_lan": True,
 }
 
@@ -167,7 +169,8 @@ def tinh_bien_the(meta: dict) -> dict:
     asins = [a for a in meta.get("asins") or [] if a in data]
     if not asins:
         return {"ok": True, "trong": True, "asins": [], "nhan_chon": NHAN}
-    res = engine.chia_nhom(rows, asins, ch["neg"], theo_asin=data, target_year=ch["target_year"])
+    res = engine.chia_nhom(rows, asins, ch["neg"], theo_asin=data, target_year=ch["target_year"],
+                           sv_min=SV_MIN, rank_min=RANK_MIN, rank_max=RANK_MAX)
     out = engine.ket_qua_json(res, dg, {"Không hợp"})
     out.update(ok=True, stats=stats, nhan_chon=NHAN, cau_hinh_rieng=ch["rieng"], target_year=ch["target_year"],
                ky={a: data[a].get("period_used") for a in asins})
@@ -401,7 +404,7 @@ class Handler(BaseHTTPRequestHandler):
         ten = (q.get("filename") or [""])[0]
         asin_file = cerebro.ASIN_RE.search(ten.upper())
         rows = cerebro.doc_file(self._body(), ten)
-        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN) if period == KY_CHINH else []
+        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN, RANK_MAX) if period == KY_CHINH else []
         if asin_file and asin_file.group(0) != asin:
             canh_bao.insert(0, f"Tên file có ASIN {asin_file.group(0)}, khác ASIN đang chọn {asin}")
         # nguon=h10: dữ liệu do extension lấy (vd chuyển bộ từ tool ở máy lên cloud), mặc định là file tải tay
@@ -556,7 +559,7 @@ class Handler(BaseHTTPRequestHandler):
             store.enqueue(j["slug"], j["asin"], period=KY_HIEN_TAI, attempt=j["attempt"] + 1)
             return self._json({"ok": True, "tiep": "thu_ky_hien_tai"})
         # Kỳ hiện tại là sản phẩm mới: cố ý không lọc SV/rank, nên không cảnh báo về bộ lọc
-        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN) if rows and period_used == KY_CHINH else []
+        canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN, RANK_MAX) if rows and period_used == KY_CHINH else []
         store.save_asin_data(j["slug"], j["asin"], rows=rows, period_used=period_used,
                              nguon="h10", canh_bao=canh_bao)
         store.update_job(job_id, status="done" if rows else "empty", rows=len(rows),

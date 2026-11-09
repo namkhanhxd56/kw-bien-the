@@ -14,7 +14,7 @@ HOST=127.0.0.1 PORT=8796 python3 -u server.py
 
 1. **Phân tích ảnh sản phẩm.** Ảnh main được tải từ 🌼 2026 Product Flow, mỗi ảnh tải một lần rồi cache vào `data/img`. Chỉ căn cứ vào ảnh; Tên mẫu, Niche và Chất liệu trên Lark chỉ để tham khảo. Hiện người tự ghi kết quả vào form, nút "Phân tích bằng AI" chưa bật.
 2. **Lấy keyword.** ASIN đối thủ lấy từ cột `ASIN đối thủ (>=3)` (ASIN trùng bị bỏ). Có thể thêm ASIN tạm trong tool. Cần tối thiểu 3 ASIN. Bấm "Tạo bộ & lấy keyword" thì mỗi ASIN thành một job trong hàng đợi.
-   - Bộ lọc: kỳ **12/2025**, Exclude variations, SV ≥ 50, Organic rank ≥ 1, mỗi ASIN chạy 1 lần.
+   - Bộ lọc: kỳ **12/2025**, Exclude variations, SV ≥ 50, Organic rank 1–100, mỗi ASIN chạy 1 lần.
    - Nếu kỳ 12/2025 trả về 0 dòng (sản phẩm mới), server tự xếp lại job với **kỳ hiện tại, bỏ Time Period
      và không lọc SV / organic rank**. Kỳ đã dùng được ghi cho từng ASIN.
    - Khi extension chưa lấy được: bấm "Tải file tay" để nạp file Cerebro đã export (xlsx/csv).
@@ -49,7 +49,7 @@ nhận về. Không dùng API/MCP của H10, không đọc token; file Export b�
 4. `[data-testid=exportdata]` → CSV/XLSX: trang tải JSON toàn bộ dòng rồi mới dựng file
    (kỳ cũ: `…/history/<id>/export/`; kỳ hiện tại: `…/single/<id>/exported-data`). Bộ lấy nhận theo nội dung
    (danh sách `phrase`), không bám đường dẫn. Kỳ hiện tại bấm Clear trước để bỏ bộ lọc H10 còn lưu.
-   Bộ lấy lấy JSON đó, lọc SV ≥ 50 (`impressionExact30`) và organic rank ≥ 1 (`organicPosition`).
+   Bộ lấy lấy JSON đó, lọc SV ≥ 50 (`impressionExact30`) và organic rank 1–100 (`organicPosition`).
 
 Job chạy lần lượt, mỗi lần 1 ASIN. Một job lỗi thì extension đóng tab, mở tab mới chạy lại 1 lần (không tốn thêm
 lượt tìm: Cerebro hiện "đã tìm trước đó" và bộ lấy mở lại lượt vừa tạo); vẫn lỗi thì báo lỗi job đó và làm job kế tiếp.
@@ -82,7 +82,7 @@ Cách chạy một job:
 ## Biến môi trường
 
 `HOST`, `PORT`, `PUBLIC_URL` (domain dựng link; trên Railway mặc định lấy `RAILWAY_PUBLIC_DOMAIN`),
-`DATA_DIR`, `AGENT_TOKEN`, `DAILY_LIMIT`, `SV_MIN`, `RANK_MIN`, `LARK_BASE`, `LARK_TABLE`, `LARK_VIEW`,
+`DATA_DIR`, `AGENT_TOKEN`, `DAILY_LIMIT`, `SV_MIN`, `RANK_MIN`, `RANK_MAX` (mặc định 100), `LARK_BASE`, `LARK_TABLE`, `LARK_VIEW`,
 `LARK_FLOW_TABLE`, `LARK_APP_ID` + `LARK_APP_SECRET` (có thì đọc Lark bằng Open API thay cho lark-cli),
 `BRO_AUTH_URL` + `BRO_AUTH_API_KEY` (đăng nhập).
 

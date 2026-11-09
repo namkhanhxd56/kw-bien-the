@@ -282,7 +282,7 @@ function renderS2() {
         <span class="filter">Kỳ <b>12/2025</b></span>
         <span class="filter"><b>Exclude variations</b></span>
         <span class="filter">Search volume <b>≥ ${f ? f.search_volume_min : 50}</b></span>
-        <span class="filter">Organic rank <b>≥ ${f ? f.organic_rank_min : 1}</b></span>
+        <span class="filter">Organic rank <b>${f ? f.organic_rank_min : 1}–${f ? f.organic_rank_max : 100}</b></span>
         <span class="filter">12/2025 không có keyword (sản phẩm mới) → <b>kỳ hiện tại, không lọc SV/rank</b></span>
         <span class="filter">Mỗi ASIN <b>1 lần chạy</b></span>
       </div>

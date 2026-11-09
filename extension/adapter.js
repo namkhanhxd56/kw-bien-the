@@ -86,18 +86,18 @@ export const ADAPTER = {
       return JSON.stringify({ url: location.href, hop: hop.slice(0, 3), quanh, sauExport, focus: document.activeElement?.outerHTML?.slice(0, 300),
                               chu: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 1500) }).slice(0, 9000);
     }
-    // Kỳ 12/2025: lọc SV ≥ 50, organic rank ≥ 1. Kỳ hiện tại (ASIN không có keyword ở 12/2025, tức sản phẩm
+    // Kỳ 12/2025: lọc SV ≥ 50, organic rank 1–100. Kỳ hiện tại (ASIN không có keyword ở 12/2025, tức sản phẩm
     // mới): không lọc gì, giữ mọi dòng Cerebro trả về.
     const doiDong = (rs, ky) => {
       const loc = ky !== "current";
-      const svMin = filters.search_volume_min ?? 50, rankMin = filters.organic_rank_min ?? 1;
+      const svMin = filters.search_volume_min ?? 50, rankMin = filters.organic_rank_min ?? 1, rankMax = filters.organic_rank_max ?? 100;
       const rows = rs.map(r => ({
         keyword: String(r.phrase ?? r.keyword ?? "").trim(),
         search_volume: r.impressionExact30 ?? r.searchVolume ?? null,
         search_volume_trend: r.searchVolumeTrend30 ?? r.searchVolumeTrend ?? null,
         organic_rank: r.organicPosition || r.organicRank || null,
-      })).filter(r => r.keyword && (!loc || ((r.search_volume ?? 0) >= svMin && r.organic_rank != null && r.organic_rank >= rankMin)));
-      log(loc ? `${rs.length} dòng Cerebro → ${rows.length} dòng sau lọc SV ≥ ${svMin}, rank ≥ ${rankMin} (${ky})`
+      })).filter(r => r.keyword && (!loc || ((r.search_volume ?? 0) >= svMin && r.organic_rank != null && r.organic_rank >= rankMin && r.organic_rank <= rankMax)));
+      log(loc ? `${rs.length} dòng Cerebro → ${rows.length} dòng sau lọc SV ≥ ${svMin}, rank ${rankMin}–${rankMax} (${ky})`
               : `${rs.length} dòng Cerebro, giữ cả ${rows.length} dòng: kỳ hiện tại không lọc SV/rank (sản phẩm mới)`);
       return rows;
     };
