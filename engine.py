@@ -461,25 +461,21 @@ def chia_nhom(rows: list[dict], asins: list[str], neg: dict, *, theo_asin: dict 
     return {"bien_the": ket, "rows": rows, "NA": NA, "asins": asins, "tung_asin": tung}
 
 
-def xep_uu_tien(ket: dict, danh_gia: dict, loai: set, *, nhieu: int = 2, rank_tot: int = 20) -> tuple[list, list]:
-    """Tầng 3: biến thể cho sản phẩm của mình, gần → xa: (1) nhiều ASIN + rank tốt, (2) nhiều ASIN + rank kém,
-    (3) ít ASIN + rank tốt, (4) ít ASIN + rank kém; cùng mức thì nhiều ASIN hơn, rồi rank tốt hơn trước.
-    Biến thể có nhãn trong `loai` (không sát sản phẩm) bị loại ra danh sách riêng."""
+def xep_uu_tien(ket: dict, danh_gia: dict, loai: set) -> tuple[list, list]:
+    """Tầng 3: biến thể cho sản phẩm của mình, gần → xa: nhiều ASIN đối thủ dùng chung trước, cùng số ASIN thì
+    rank tốt nhất nhỏ hơn trước (vd 3/3 ASIN rank 1 → 3/3 rank 2 → … → 2/3 rank 1 …). Biến thể có nhãn trong
+    `loai` (không sát sản phẩm) bị loại ra danh sách riêng."""
     chon, bo = [], []
     for sheet, ds in ket.items():
         for v in ds:
             x = {**v, "sheet": sheet, "nhan": danh_gia.get(v["ten"], "")}
-            if x["nhan"] in loai:
-                bo.append(x)
-                continue
-            x["muc"] = (1 if v["rank"] <= rank_tot else 2) if v["so_asin"] >= nhieu else (3 if v["rank"] <= rank_tot else 4)
-            chon.append(x)
-    chon.sort(key=lambda v: (v["muc"], -v["so_asin"], v["rank"], -v["sv"]))
+            (bo if x["nhan"] in loai else chon).append(x)
+    chon.sort(key=lambda v: (-v["so_asin"], v["rank"], -v["sv"]))
     return chon, bo
 
 
 def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia: dict | None = None,
-                   loai: set | None = None, nhieu: int = 2, rank_tot: int = 20) -> dict:
+                   loai: set | None = None) -> dict:
     """Sheet theo 3 tầng: '1. <ASIN>' (biến thể + kw của từng ASIN đối thủ), '2. So sanh ASIN' (biến thể dùng
     chung, rank tốt nhất ở từng ASIN), '3. Chon cho SP' (biến thể đúng sản phẩm, gần → xa, loại không sát);
     sau đó là bảng chia đủ (KW PRODUCT / KW GIFTS / FUNCTION / Seasonal / Ngoai bo loc) để kiểm mỗi kw đúng 1 lần.
@@ -497,8 +493,6 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
     F_H = PatternFill("solid", fgColor="FF1F3864")
     B = Font(bold=True)
     KY = {"2025-12": "12/2025", "current": "hiện tại"}
-    MUC = {1: "Ưu tiên 1 · nhiều ASIN + rank tốt", 2: "Ưu tiên 2 · nhiều ASIN + rank kém",
-           3: "Ưu tiên 3 · ít ASIN + rank tốt", 4: "Ưu tiên 4 · ít ASIN + rank kém"}
     written = {}
     wb = Workbook()
     wb.remove(wb.active)
@@ -574,16 +568,17 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
         wv.column_dimensions[col].width = w
 
     # ---- Tầng 3: chọn cho sản phẩm
-    chon, bo = xep_uu_tien(res["bien_the"], danh_gia, loai, nhieu=nhieu, rank_tot=rank_tot)
+    chon, bo = xep_uu_tien(res["bien_the"], danh_gia, loai)
     ws = wb.create_sheet("3. Chon cho SP")
     dau(ws)
     muc_cu = None
-    for v in chon:
-        if v["muc"] != muc_cu:
-            muc(ws, MUC[v["muc"]] + f" (nhiều = ≥ {nhieu}/{NA} ASIN, rank tốt = ≤ {rank_tot})")
-            muc_cu = v["muc"]
+    for i, v in enumerate(chon, 1):
+        v["thu_tu"] = i
+        if v["so_asin"] != muc_cu:
+            muc(ws, f"Dùng ở {v['so_asin']}/{NA} ASIN đối thủ · xếp theo rank tốt nhất (nhỏ trước)")
+            muc_cu = v["so_asin"]
         b = [r for r in rows if r["sheet"] == v["sheet"] and r["khoi"] == v["ten"]]
-        khoi(ws, f"{v['ten']}  ({'Product' if v['sheet'] == 'KW PRODUCT' else 'Gift'})", b,
+        khoi(ws, f"{v['thu_tu']}. {v['ten']}  ({'Product' if v['sheet'] == 'KW PRODUCT' else 'Gift'})", b,
              f"{v['so_asin']}/{NA} ASIN · rank tốt nhất {v['rank']}" + (f" · {v['nhan']}" if v["nhan"] else ""), F_V, rank=v["rank"])
     if bo:
         muc(ws, "Loại: biến thể không sát sản phẩm")
@@ -626,5 +621,5 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
     wb.save(path)
     tong = len({r["keyword"] for r in rows})
     return {"tong": tong, "ghi": sum(written.values()), "trung": sum(1 for v in written.values() if v > 1),
-            "thieu": tong - len(written), "chon": [(v["muc"], v["ten"], v["sheet"], v["so_asin"], v["rank"]) for v in chon],
+            "thieu": tong - len(written), "chon": [(v["thu_tu"], v["ten"], v["sheet"], v["so_asin"], v["rank"]) for v in chon],
             "loai": [v["ten"] for v in bo]}
