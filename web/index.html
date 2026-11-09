@@ -458,8 +458,7 @@ function schedulePoll() {
 
 // Nút thiếu quyền mờ đi mỗi khi phần chi tiết vẽ lại (server vẫn gác, đây chỉ là hiển thị)
 new MutationObserver(() => AUTHUI.apply($("#detail"))).observe($("#detail"), { childList: true, subtree: true });
-AUTHUI.boot();
-loadStatus().then(() => loadProducts(false));
+AUTHUI.boot().finally(() => loadStatus().then(() => loadProducts(false)));
 setInterval(loadStatus, 30000);
 </script>
 </body>

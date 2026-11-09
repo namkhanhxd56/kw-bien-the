@@ -253,3 +253,47 @@ dialog.zoom img { display: block; max-width: 100%; max-height: 85vh; }
 .whoami a:hover { color: var(--ink); }
 [data-denied] { opacity: .45; cursor: not-allowed; }
 label[data-denied] { pointer-events: none; }
+
+/* ---------- biến thể (trang /kw-list) */
+.tabs { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { border: 0; background: none; padding: 11px 12px; font: inherit; font-size: 13px; color: var(--ink-2); cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--primary); font-weight: 600; }
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tab-body { padding: 14px 18px 18px; }
+.nhom-head { margin: 18px 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.nhom-head:first-child { margin-top: 0; }
+.vb { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 6px; background: var(--surface); }
+.vb > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 9px 12px; }
+.vb > summary::-webkit-details-marker { display: none; }
+.vb > summary:hover { background: var(--surface-2); }
+.vb > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.vb[open] > summary { border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.vb .vt { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 600; }
+.vb .vt .so { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 22px; }
+.vb .vt .ten { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb .vt .caret { width: 0; height: 0; border-left: 5px solid var(--muted); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .12s; flex: none; }
+.vb[open] .vt .caret { transform: rotate(90deg); }
+.vb .vm { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vb .vm b { color: var(--ink); }
+.vb .vr { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); padding-left: 30px; }
+.vb .vr span b { color: var(--ink-2); font-weight: 500; }
+.vb .table-wrap { border: 0; border-radius: 0; }
+.vb.phu > summary .vt { font-weight: 500; color: var(--ink-2); }
+.vb.loai { opacity: .75; }
+.tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--ink-2); font-weight: 500; }
+.nhan { height: 26px; padding: 0 6px; border: 1px solid var(--line-2); border-radius: 6px; font: inherit; font-size: 12px; background: #fff; }
+.nhan.sat { border-color: var(--ok); color: var(--ok); }
+.nhan.xa { border-color: var(--warn); color: var(--warn); }
+.nhan.khong { border-color: var(--bad); color: var(--bad); }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; margin-bottom: 12px; flex-wrap: wrap; }
+.seg button { border: 0; background: #fff; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; border-right: 1px solid var(--line-2); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--primary); color: #fff; }
+@media (max-width: 640px) {
+  .vb > summary { grid-template-columns: 1fr; }
+  .vb .vm { flex-wrap: wrap; gap: 8px; }
+  .vb .vr { padding-left: 0; }
+  .tab-body { padding: 12px; }
+}

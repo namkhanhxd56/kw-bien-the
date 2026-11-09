@@ -19,7 +19,12 @@ HOST=127.0.0.1 PORT=8796 python3 -u server.py
      và không lọc SV / organic rank**. Kỳ đã dùng được ghi cho từng ASIN.
    - Khi extension chưa lấy được: bấm "Tải file tay" để nạp file Cerebro đã export (xlsx/csv).
 3. **Trang `/kw-list/<tên bộ>`.** Hiển thị keyword đã gộp: mỗi keyword giữ dòng có organic rank tốt nhất, hoà thì lấy SV cao hơn. Có lọc, sắp xếp, tải CSV. Nút "Ghi link vào Lark" ghi vào cột `Link bộ Keyword`, có hộp xác nhận trước khi ghi.
-4. **Xác định biến thể.** Bước sau, chưa có trong bản này.
+4. **Biến thể** (thẻ "Biến thể" trên trang `/kw-list/<tên bộ>`, `engine.chia_nhom`). Theo PDF, làm 3 tầng:
+   - **Từng ASIN:** biến thể rút từ kw chứa ornament / gift rank 1–50 của chính ASIN, bỏ từ gốc và chữ chung chung; rank tốt nhất trong ASIN đó; kw của ASIN gom vào biến thể.
+   - **So sánh ASIN:** số ASIN dùng chung từng biến thể và rank ở từng ASIN.
+   - **Chọn cho sản phẩm:** xếp số ASIN dùng chung nhiều trước, cùng số ASIN thì rank tốt nhất nhỏ trước. Nhãn Sát / Xa / Không hợp sửa ngay trên trang (lưu ở `data/lists/<bộ>/danh_gia.json`); "Không hợp" bị loại.
+
+   Negative mặc định ở `cau-hinh/neg-mac-dinh.json`; bộ nào cần riêng (negative, nhãn ban đầu, năm) thì thêm `cau-hinh/<Mã nội bộ>.json` (vd `BSV627.json`).
 
 ## Extension Cerebro (`extension/`)
 

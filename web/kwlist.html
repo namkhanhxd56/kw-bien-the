@@ -22,9 +22,15 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const fmt = n => n == null ? "—" : Number(n).toLocaleString("vi-VN");
 const KY = {"2025-12": "12/2025", "current": "Kỳ hiện tại"};
 const TT = { chua_lay: ["Chưa lấy", ""], cho: ["Chờ extension", "info"], dang_lay: ["Đang lấy", "info"], xong: ["Xong", "ok"], rong: ["Không có dữ liệu", "warn"], loi: ["Lỗi", "bad"] };
+const SHEET = { "KW PRODUCT": "Product", "KW GIFTS": "Gift" };
+const NHAN_CLS = { "Sát": "sat", "Xa": "xa", "Không hợp": "khong" };
+const TABS = [["chon", "Chọn cho sản phẩm"], ["so-sanh", "So sánh ASIN"], ["asin", "Từng ASIN"], ["tat-ca", "Tất cả keyword"]];
 const slug = decodeURIComponent(location.pathname.replace(/^\/kw-list\//, ""));
 const PAGE = 300;
-let L = null, view = { q: "", asin: "", orn: false, sort: "sv", dir: -1, shown: PAGE };
+let L = null, BT = null, view = { q: "", asin: "", orn: false, sort: "sv", dir: -1, shown: PAGE };
+let tab = (location.hash.slice(1) || "chon").replace(/^asin-.*/, "asin"), asinChon = (location.hash.match(/^#asin-(\w+)/) || [])[1] || null;
+if (!TABS.some(([k]) => k === tab)) tab = "chon";
+let moHet = false;
 
 function toast(m, bad) { const t = $("#toast"); t.textContent = m; t.className = "toast show" + (bad ? " bad" : ""); clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", 2500); }
 
@@ -34,6 +40,7 @@ async function load() {
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || "Không đọc được");
     L = d.list; document.title = L.ten; $("#crumb").textContent = L.ten;
+    await loadBT();
     render();
     if (L.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) setTimeout(load, 5000);
   } catch (e) {
@@ -41,18 +48,25 @@ async function load() {
   }
 }
 
-function rowsView() {
-  const q = view.q.toLowerCase();
-  let rs = L.rows.filter(r => (!q || r.keyword.toLowerCase().includes(q)) && (!view.asin || r.cac_asin.includes(view.asin)) && (!view.orn || /\bornaments?\b/i.test(r.keyword)));
-  const k = view.sort, d = view.dir;
-  rs.sort((a, b) => {
-    const x = a[k], y = b[k];
-    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
-    return (typeof x === "string" ? x.localeCompare(y) : x - y) * d;
-  });
-  return rs;
+async function loadBT() {
+  if (!L.rows.length) { BT = null; return; }
+  try {
+    const r = await fetch(`/api/lists/${encodeURIComponent(slug)}/bien-the`);
+    const d = await r.json();
+    BT = r.ok && d.ok ? d : { loi: d.error || "Không chia được biến thể" };
+  } catch (e) { BT = { loi: e.message }; }
 }
 
+async function datNhan(ten, nhan) {
+  try {
+    const r = await fetch(`/api/lists/${encodeURIComponent(slug)}/bien-the/nhan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ten, nhan }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || "Không lưu được nhãn");
+    BT = d; renderTab(); toast(`Đã đặt "${ten}": ${nhan || "bỏ nhãn"}`);
+  } catch (e) { toast(e.message, true); renderTab(); }
+}
+
+// ---------------------------------------------------------------- khung trang
 function render() {
   const s = L.stats, asins = L.trang_thai_asin;
   $("#root").innerHTML = `
@@ -73,7 +87,7 @@ function render() {
         <tbody>${asins.map(a => { const [l, c] = TT[a.trang_thai] || [a.trang_thai, ""]; return `<tr>
           <td class="mono"><a href="https://www.amazon.com/dp/${a.asin}" target="_blank" rel="noopener">${a.asin}</a></td>
           <td><span class="badge ${c}">${l}</span></td>
-          <td>${a.period_used ? KY[a.period_used] : "—"}</td>
+          <td>${a.period_used ? KY[a.period_used] + (a.period_used === "current" ? " (không lọc)" : "") : "—"}</td>
           <td class="num">${a.so_kw ? fmt(a.so_kw) : "—"}</td>
           <td>${a.nguon === "h10" ? "H10 tự động" : a.nguon === "file" ? "File tải tay" : "—"}</td>
           <td class="small" style="white-space:normal;color:var(--warn)">${a.canh_bao.map(esc).join("; ") || '<span class="muted">—</span>'}</td></tr>`; }).join("")}</tbody>
@@ -82,13 +96,126 @@ function render() {
 
     <div class="card section">
       <div class="section-head" style="flex-wrap:wrap">
-        <div class="grow"><h2>Keyword đã gộp</h2><p>Mỗi keyword giữ dòng có organic rank tốt nhất; hoà rank thì lấy search volume cao hơn.</p></div>
-        <input class="input" id="f-q" type="search" placeholder="Lọc keyword" style="width:200px" aria-label="Lọc keyword" value="${esc(view.q)}">
-        <select class="input" id="f-asin" style="width:auto" aria-label="Lọc theo ASIN"><option value="">Mọi ASIN</option>${asins.map(a => `<option ${view.asin === a.asin ? "selected" : ""}>${a.asin}</option>`).join("")}</select>
-        <label class="row small"><input type="checkbox" id="f-orn" ${view.orn ? "checked" : ""}> Chỉ keyword có "ornament"</label>
+        <div class="grow"><h2>Biến thể</h2><p>Rút từ chính dữ liệu từng ASIN (kw chứa ornament / gift rank 1–50), so giữa các ASIN, rồi chọn cho sản phẩm.</p></div>
+        <button class="btn sm" id="mo-het" type="button">${moHet ? "Thu hết" : "Mở hết"}</button>
       </div>
-      <div id="tbl"></div>
+      <div class="tabs" role="tablist" aria-label="Các bước chia biến thể">
+        ${TABS.map(([k, l]) => `<button role="tab" type="button" data-tab="${k}" aria-selected="${tab === k}">${l}</button>`).join("")}
+      </div>
+      <div class="tab-body" id="tab-body" role="tabpanel"></div>
     </div>`;
+  document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { tab = b.dataset.tab; dongBoHash(); render(); });
+  $("#mo-het").onclick = () => { moHet = !moHet; render(); };
+  renderTab();
+}
+
+function dongBoHash() { history.replaceState(null, "", "#" + (tab === "asin" && asinChon ? "asin-" + asinChon : tab)); }
+
+function renderTab() {
+  const el = $("#tab-body");
+  if (tab === "tat-ca") return renderTatCa(el);
+  if (!L.rows.length) { el.innerHTML = `<div class="empty"><h3>Chưa có keyword</h3><p>Chờ extension lấy Cerebro, hoặc tải file tay ở trang chính.</p></div>`; return; }
+  if (!BT || BT.loi) { el.innerHTML = `<div class="note bad">${esc(BT?.loi || "Chưa chia được biến thể")}</div>`; return; }
+  if (tab === "chon") renderChon(el);
+  else if (tab === "so-sanh") renderSoSanh(el);
+  else renderTungAsin(el);
+  el.querySelectorAll("select.nhan").forEach(s => {
+    s.addEventListener("click", e => e.stopPropagation());       // không gập/mở khối khi chọn nhãn
+    s.addEventListener("change", () => datNhan(s.dataset.ten, s.value));
+  });
+  AUTHUI.apply(el);
+}
+
+// ---------------------------------------------------------------- khối biến thể
+function chonNhan(ten, nhan) {
+  return `<select class="nhan ${NHAN_CLS[nhan] || ""}" data-ten="${esc(ten)}" aria-label="So ${esc(ten)} với sản phẩm" data-cap="kw.edit" data-need="edit">
+    <option value="">Chưa đánh giá</option>${BT.nhan_chon.map(n => `<option ${n === nhan ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+}
+
+function bangKw(kw) {
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Keyword</th><th class="num">Search volume</th><th class="num">Trend</th><th class="num">Organic rank</th><th>ASIN nguồn</th><th class="num">Số ASIN có</th><th>Kỳ</th><th>Lý do loại</th></tr></thead>
+    <tbody>${kw.map(r => `<tr><td class="kw">${esc(r.keyword)}</td><td class="num">${fmt(r.sv)}</td><td class="num">${r.trend == null ? "—" : r.trend + "%"}</td>
+      <td class="num">${fmt(r.rank)}</td><td class="mono">${r.asin}</td><td class="num">${r.so_asin}/${BT.NA}</td><td>${KY[r.ky] || "—"}</td>
+      <td class="small" style="white-space:normal">${esc((r.neg || []).join("; "))}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+function khoi({ so, ten, tag, nhan, mot, hai, kw, cls }) {
+  return `<details class="vb ${cls || ""}" ${moHet ? "open" : ""}>
+    <summary>
+      <span class="vt"><span class="caret" aria-hidden="true"></span>${so != null ? `<span class="so">${so}.</span>` : ""}<span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}</span>
+      <span class="vm">${mot}${nhan !== undefined ? chonNhan(ten, nhan) : ""}</span>
+      ${hai ? `<span class="vr">${hai}</span>` : ""}
+    </summary>
+    ${kw.length ? bangKw(kw) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
+  </details>`;
+}
+
+const rankAsin = per => BT.asins.map(a => `<span>${a}: <b>${per[a] == null ? "—" : "r" + per[a]}</b></span>`).join("");
+const soLieu = v => `<span><b>${v.so_asin}/${BT.NA}</b> ASIN</span><span>rank tốt nhất <b>${v.rank}</b></span><span><b>${fmt(v.sv)}</b> SV</span><span><b>${v.so_kw}</b> kw</span>`;
+
+function renderChon(el) {
+  let html = `<p class="small muted" style="margin:0 0 12px">Chỉ giữ biến thể đúng với sản phẩm, xếp gần → xa: biến thể nhiều ASIN đối thủ dùng chung đứng trước; cùng số ASIN thì rank tốt nhất nhỏ hơn đứng trước. Đặt nhãn “Không hợp” để loại; thứ tự tự xếp lại.</p>`;
+  let truoc = null;
+  for (const v of BT.chon) {
+    if (v.so_asin !== truoc) { html += `<div class="nhom-head">Dùng ở ${v.so_asin}/${BT.NA} ASIN đối thủ</div>`; truoc = v.so_asin; }
+    html += khoi({ so: v.thu_tu, ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, mot: soLieu(v), hai: rankAsin(v.per) });
+  }
+  if (BT.loai.length) {
+    html += `<div class="nhom-head">Loại: không sát sản phẩm</div>`;
+    for (const v of BT.loai) html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, cls: "loai", mot: soLieu(v), hai: rankAsin(v.per) });
+  }
+  if (!BT.chon.length && !BT.loai.length) html += `<div class="empty"><h3>Chưa rút được biến thể nào</h3><p>Không ASIN nào có keyword chứa ornament / gift trong top 1–50.</p></div>`;
+  el.innerHTML = html;
+}
+
+function renderSoSanh(el) {
+  el.innerHTML = Object.entries(BT.so_sanh).map(([sheet, ds]) => `
+    <div class="nhom-head">${SHEET[sheet]}: ${ds.length} biến thể · xếp theo số ASIN dùng chung, rồi rank tốt nhất</div>
+    ${ds.length ? `<div class="table-wrap" style="margin-bottom:8px"><table>
+      <thead><tr><th>Biến thể</th><th class="num">ASIN dùng</th><th>Nhóm</th><th class="num">Rank tốt nhất</th>${BT.asins.map(a => `<th class="num">Rank ${a}<div class="small muted" style="font-weight:400">${KY[BT.ky[a]] || ""}</div></th>`).join("")}
+        <th class="num">Tổng SV</th><th class="num">Số kw</th><th>Bậc lọc</th><th>So với sản phẩm</th><th>Root (kw rank tốt nhất)</th></tr></thead>
+      <tbody>${ds.map(v => `<tr><td><b>${esc(v.ten)}</b></td><td class="num">${v.so_asin}/${BT.NA}</td><td>Nhóm ${v.nhom}</td><td class="num">${v.rank}</td>
+        ${BT.asins.map(a => `<td class="num">${v.per[a] == null ? '<span class="muted">—</span>' : v.per[a]}</td>`).join("")}
+        <td class="num">${fmt(v.sv)}</td><td class="num">${v.so_kw}</td><td>${v.bac}</td><td>${chonNhan(v.ten, v.nhan)}</td><td class="kw">${esc(v.root)}</td></tr>`).join("")}</tbody>
+    </table></div>` : '<p class="small muted">Không có biến thể.</p>'}`).join("");
+}
+
+function renderTungAsin(el) {
+  const ds = BT.tung_asin;
+  if (!asinChon || !ds.some(t => t.asin === asinChon)) asinChon = ds[0]?.asin;
+  const t = ds.find(x => x.asin === asinChon);
+  el.innerHTML = `<div class="seg" role="group" aria-label="Chọn ASIN">${ds.map(x => `<button type="button" data-asin="${x.asin}" aria-pressed="${x.asin === asinChon}">${x.asin} · ${KY[x.ky] || x.ky}</button>`).join("")}</div>
+    <p class="small muted" style="margin:0 0 12px">Biến thể của riêng ASIN này: rút từ kw chứa ornament / gift rank 1–50 của chính ASIN; rank tốt nhất là rank của kw biến thể trong ASIN này; kw của ASIN gom vào biến thể theo rule.</p>
+    ${Object.entries(t.bien_the).map(([sheet, vs]) => `<div class="nhom-head">${SHEET[sheet]}: ${vs.filter(v => !v.phu).length} biến thể</div>` +
+      (vs.length ? vs.map(v => khoi({ ten: v.ten, kw: v.kw, cls: v.phu ? "phu" : "",
+        mot: (v.rank != null ? `<span>rank tốt nhất <b>${v.rank}</b></span>` : "") + `<span><b>${fmt(v.sv)}</b> SV</span><span><b>${v.so_kw}</b> kw</span>`,
+        hai: v.root ? `<span>root: <b>${esc(v.root)}</b></span>` : "" })).join("") : '<p class="small muted">Không có.</p>')).join("")}`;
+  el.querySelectorAll("[data-asin]").forEach(b => b.onclick = () => { asinChon = b.dataset.asin; dongBoHash(); renderTab(); });
+}
+
+// ---------------------------------------------------------------- tất cả keyword (bảng gộp)
+function rowsView() {
+  const q = view.q.toLowerCase();
+  let rs = L.rows.filter(r => (!q || r.keyword.toLowerCase().includes(q)) && (!view.asin || r.cac_asin.includes(view.asin)) && (!view.orn || /\bornaments?\b/i.test(r.keyword)));
+  const k = view.sort, d = view.dir;
+  rs.sort((a, b) => {
+    const x = a[k], y = b[k];
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * d;
+  });
+  return rs;
+}
+
+function renderTatCa(el) {
+  el.innerHTML = `
+    <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <input class="input" id="f-q" type="search" placeholder="Lọc keyword" style="width:200px" aria-label="Lọc keyword" value="${esc(view.q)}">
+      <select class="input" id="f-asin" style="width:auto" aria-label="Lọc theo ASIN"><option value="">Mọi ASIN</option>${L.trang_thai_asin.map(a => `<option ${view.asin === a.asin ? "selected" : ""}>${a.asin}</option>`).join("")}</select>
+      <label class="row small"><input type="checkbox" id="f-orn" ${view.orn ? "checked" : ""}> Chỉ keyword có "ornament"</label>
+      <span class="small muted">Mỗi keyword giữ dòng có organic rank tốt nhất; hoà rank thì lấy search volume cao hơn.</span>
+    </div>
+    <div id="tbl"></div>`;
   $("#f-q").addEventListener("input", e => { view.q = e.target.value; view.shown = PAGE; renderTable(); });
   $("#f-asin").addEventListener("change", e => { view.asin = e.target.value; view.shown = PAGE; renderTable(); });
   $("#f-orn").addEventListener("change", e => { view.orn = e.target.checked; view.shown = PAGE; renderTable(); });
@@ -103,13 +230,13 @@ function renderTable() {
   const rs = rowsView();
   const th = (k, l, num) => `<th class="sort ${num ? "num" : ""}" data-k="${k}" aria-sort="${view.sort === k ? (view.dir > 0 ? "ascending" : "descending") : "none"}">${l}${view.sort === k ? (view.dir > 0 ? " ↑" : " ↓") : ""}</th>`;
   $("#tbl").innerHTML = `
-    <div class="table-wrap" style="border:0;border-radius:0"><table>
+    <div class="table-wrap"><table>
       <thead><tr>${th("keyword", "Keyword")}${th("sv", "Search volume", 1)}${th("trend", "Trend", 1)}${th("rank", "Organic rank", 1)}<th>ASIN nguồn</th>${th("so_asin", "Số ASIN có", 1)}<th>Kỳ</th></tr></thead>
       <tbody>${rs.slice(0, view.shown).map(r => `<tr>
         <td class="kw">${esc(r.keyword)}</td><td class="num">${fmt(r.sv)}</td><td class="num">${r.trend == null ? "—" : r.trend + "%"}</td>
         <td class="num">${fmt(r.rank)}</td><td class="mono">${r.asin}</td><td class="num">${r.so_asin}/${L.asins.length}</td><td>${KY[r.ky] || "—"}</td></tr>`).join("")}</tbody>
     </table></div>
-    <div class="row" style="justify-content:space-between;padding:10px 14px;border-top:1px solid var(--line)">
+    <div class="row" style="justify-content:space-between;padding:10px 0 0">
       <span class="small muted">Hiện ${fmt(Math.min(view.shown, rs.length))} / ${fmt(rs.length)} keyword</span>
       ${rs.length > view.shown ? '<button class="btn sm" id="more">Hiện thêm</button>' : ""}
     </div>`;
@@ -119,8 +246,8 @@ function renderTable() {
   const m = $("#more"); if (m) m.onclick = () => { view.shown += PAGE; renderTable(); };
 }
 
-AUTHUI.boot();
-load();
+// Đọc quyền trước rồi mới vẽ: vẽ trước thì nút sửa bị mờ oan (lúc đó chưa biết quyền)
+AUTHUI.boot().finally(load);
 </script>
 </body>
 </html>

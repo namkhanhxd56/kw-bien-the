@@ -3,107 +3,6 @@
  "bo": "BSV627-first-christmas-ornament",
  "target_year": "2026",
  "neg_goc": "keyword-final-goi-day-du/niches/cat/neg.json (bỏ 'Nghia khac')",
- "variants": [
-  {
-   "name": "new us citizen",
-   "words": [
-    "new us citizen",
-    "new american citizen",
-    "new citizen",
-    "new us citizenship",
-    "new american citizenship",
-    "new american",
-    "newly naturalized"
-   ],
-   "exclude": []
-  },
-  {
-   "name": "american citizenship",
-   "words": [
-    "american citizen",
-    "us citizen",
-    "american citizenship",
-    "us citizenship",
-    "usa citizen",
-    "usa citizenship",
-    "united states citizen"
-   ],
-   "exclude": []
-  },
-  {
-   "name": "american flag",
-   "words": [
-    "american flag",
-    "us flag",
-    "usa flag"
-   ],
-   "exclude": []
-  },
-  {
-   "name": "first christmas",
-   "words": [
-    "first christmas"
-   ],
-   "exclude": [
-    "=baby",
-    "=dad",
-    "=mom",
-    "=married",
-    "=newlywed",
-    "=mr",
-    "=mrs",
-    "=home",
-    "=house",
-    "=puppy",
-    "=dog",
-    "=cat",
-    "=grandma",
-    "=grandpa",
-    "=couple",
-    "=boyfriend",
-    "=girlfriend"
-   ]
-  },
-  {
-   "name": "citizenship",
-   "words": [
-    "citizen",
-    "citizenship",
-    "naturalization",
-    "naturalized",
-    "naturalisation"
-   ],
-   "exclude": []
-  },
-  {
-   "name": "patriotic",
-   "words": [
-    "patriotic",
-    "patriot"
-   ],
-   "exclude": [
-    "=patriots"
-   ]
-  },
-  {
-   "name": "passport",
-   "words": [
-    "passport"
-   ],
-   "exclude": []
-  },
-  {
-   "name": "american",
-   "words": [
-    "american",
-    "america",
-    "usa",
-    "united states"
-   ],
-   "exclude": [],
-   "rong": true
-  }
- ],
  "neg": {
   "Negative B mac dinh": [
    "=personalized",
@@ -334,5 +233,26 @@
    "beach ball",
    "=souvenirs"
   ]
- }
+ },
+ "danh_gia": {
+  "us citizenship": "Sát",
+  "american citizenship": "Sát",
+  "new us citizenship": "Sát",
+  "citizenship": "Sát",
+  "new citizenship": "Sát",
+  "new american citizen": "Sát",
+  "new citizen": "Sát",
+  "usa citizenship": "Sát",
+  "citizenship congratulation": "Sát",
+  "citizen": "Sát",
+  "new us citizen": "Sát",
+  "us citizen": "Sát",
+  "naturalization": "Sát",
+  "american": "Xa",
+  "usa": "Xa",
+  "patriotic": "Xa",
+  "new year": "Không hợp",
+  "american foreigners": "Không hợp"
+ },
+ "_ghi_chu": "Bộ BSV627: negative riêng và nhãn so với sản phẩm (Sát / Xa / Không hợp, theo ảnh: First Christmas as an American Citizen 2026). Nhãn sửa trên trang /kw-list được lưu trong data, đè lên đây."
 }

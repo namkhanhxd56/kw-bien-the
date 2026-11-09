@@ -69,10 +69,12 @@ ROUTES = [
     ("GET", r"/api/analysis/[^/]+", "kw.view", "view"),
     ("GET", r"/api/lists/[^/]+", "kw.view", "view"),
     ("GET", r"/api/lists/[^/]+/export\.csv", "kw.view", "view"),
+    ("GET", r"/api/lists/[^/]+/bien-the", "kw.view", "view"),
     ("POST", r"/api/analysis/[^/]+", "kw.edit", "edit"),
     ("POST", r"/api/lists", "kw.edit", "edit"),
     ("POST", r"/api/lists/[^/]+/(fetch|cancel|upload)", "kw.edit", "edit"),
     ("POST", r"/api/lists/[^/]+/lark-link", "kw.lark", "edit"),
+    ("POST", r"/api/lists/[^/]+/bien-the/nhan", "kw.edit", "edit"),
 ]
 _ROUTES = [(m, re.compile(p), c, n) for m, p, c, n in ROUTES]
 MAC_DINH = ("kw.view", "view")

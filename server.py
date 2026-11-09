@@ -41,11 +41,14 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import auth
 import cerebro
+import engine
 import lark
 from store import KY_CHINH, KY_HIEN_TAI, Store
 
 GOC = Path(__file__).resolve().parent
 WEB = GOC / "web"
+CAU_HINH = GOC / "cau-hinh"
+NHAN = ["Sát", "Xa", "Không hợp"]   # so biến thể với sản phẩm; "Không hợp" bị loại khỏi danh sách chọn
 HOST = os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8796"))
 _RW = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
@@ -126,6 +129,34 @@ def tom_tat_bo(meta: dict, kem_dong: bool = False) -> dict:
         rows, stats = cerebro.gop(data)
         ky = {d["period_used"] for d in data.values() if d["rows"]}
         out.update(rows=rows, stats=stats, ky_tron=len(ky) > 1)
+    return out
+
+
+def cau_hinh(ma: str) -> dict:
+    """Negative + nhãn so với sản phẩm cho một mã: cau-hinh/<Mã>.json nếu có, không thì negative mặc định."""
+    neg = json.loads((CAU_HINH / "neg-mac-dinh.json").read_text("utf-8"))
+    ch = {"neg": neg, "danh_gia": {}, "target_year": time.strftime("%Y"), "rieng": False}
+    f = CAU_HINH / f"{store.slugify(ma).upper()}.json"
+    if f.is_file():
+        c = json.loads(f.read_text("utf-8"))
+        ch.update(neg=c.get("neg") or neg, danh_gia=c.get("danh_gia") or {}, target_year=c.get("target_year") or ch["target_year"], rieng=True)
+    return ch
+
+
+def tinh_bien_the(meta: dict) -> dict:
+    """Chia biến thể 3 tầng (engine.chia_nhom) cho một bộ keyword, nhãn người dùng sửa đè lên nhãn cấu hình."""
+    slug = meta["slug"]
+    data = {a: d for a, d in store.all_asin_data(slug, meta.get("asins") or []).items() if d.get("rows")}
+    rows, stats = cerebro.gop(data)
+    ch = cau_hinh(meta["ma"])
+    dg = {**ch["danh_gia"], **store._read(store.list_dir(slug) / "danh_gia.json", {})}
+    asins = [a for a in meta.get("asins") or [] if a in data]
+    if not asins:
+        return {"ok": True, "trong": True, "asins": [], "nhan_chon": NHAN}
+    res = engine.chia_nhom(rows, asins, ch["neg"], theo_asin=data, target_year=ch["target_year"])
+    out = engine.ket_qua_json(res, dg, {"Không hợp"})
+    out.update(ok=True, stats=stats, nhan_chon=NHAN, cau_hinh_rieng=ch["rieng"], target_year=ch["target_year"],
+               ky={a: data[a].get("period_used") for a in asins})
     return out
 
 
@@ -224,6 +255,9 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.fullmatch(r"/api/lists/([^/]+)/export\.csv", path)
                 if m:
                     return self._export(m.group(1))
+                m = re.fullmatch(r"/api/lists/([^/]+)/bien-the", path)
+                if m:
+                    return self._bien_the(m.group(1))
                 if path == "/api/agent/next":
                     return self._agent_next()
                 if path == "/api/agent/ping":
@@ -249,6 +283,9 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.fullmatch(r"/api/lists/([^/]+)/lark-link", path)
                 if m:
                     return self._lark_link(m.group(1))
+                m = re.fullmatch(r"/api/lists/([^/]+)/bien-the/nhan", path)
+                if m:
+                    return self._dat_nhan(m.group(1))
                 if path == "/api/agent/capture":
                     return self._agent_capture()
                 m = re.fullmatch(r"/api/agent/jobs/([a-f0-9]+)/(result|fail)", path)
@@ -368,6 +405,27 @@ class Handler(BaseHTTPRequestHandler):
         body = ("﻿" + buf.getvalue()).encode("utf-8")
         self._send(200, body, "text/csv; charset=utf-8",
                    {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(slug)}.csv"})
+
+    def _bien_the(self, slug: str):
+        meta = store.get_list(slug)
+        if not meta:
+            return self._err(404, "Chưa có bộ keyword này")
+        self._json(tinh_bien_the(meta))
+
+    def _dat_nhan(self, slug: str):
+        # Nhãn so với sản phẩm cho một biến thể (Sát / Xa / Không hợp; rỗng = bỏ nhãn), lưu riêng cho bộ này
+        meta = store.get_list(slug)
+        if not meta:
+            return self._err(404, "Chưa có bộ keyword này")
+        b = self._jbody()
+        ten, nhan = str(b.get("ten") or "").strip(), str(b.get("nhan") or "").strip()
+        if not ten or (nhan and nhan not in NHAN):
+            raise ValueError("Thiếu tên biến thể hoặc nhãn không hợp lệ")
+        f = store.list_dir(slug) / "danh_gia.json"
+        dg = store._read(f, {})
+        dg[ten] = nhan   # rỗng vẫn ghi để đè nhãn cấu hình
+        store._write(f, dg)
+        self._json(tinh_bien_the(meta))
 
     def _lark_link(self, slug: str):
         meta = store.get_list(slug)

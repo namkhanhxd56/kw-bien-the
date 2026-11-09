@@ -623,3 +623,46 @@ def xuat_nhom_xlsx(res: dict, path: str, ten: str, tom_tat: list[list], danh_gia
     return {"tong": tong, "ghi": sum(written.values()), "trung": sum(1 for v in written.values() if v > 1),
             "thieu": tong - len(written), "chon": [(v["thu_tu"], v["ten"], v["sheet"], v["so_asin"], v["rank"]) for v in chon],
             "loai": [v["ten"] for v in bo]}
+
+
+def ket_qua_json(res: dict, danh_gia: dict | None = None, loai: set | None = None) -> dict:
+    """Kết quả 3 tầng dạng JSON cho trang /kw-list (không cần openpyxl)."""
+    danh_gia, loai = danh_gia or {}, loai or set()
+    NA, asins = res["NA"], res["asins"]
+    gon = lambda r: {"keyword": r["keyword"], "sv": r["sv"], "trend": r["trend"], "rank": r["rank"], "asin": r["asin"],
+                     "so_asin": r.get("so_asin", 1), "ky": r.get("ky"), "neg": r["neg"]}
+    xep_kw = lambda rs: sorted(rs, key=lambda r: (r["rank"] if r["rank"] is not None else 9e9, -(r["sv"] or 0)))
+    khoi = lambda rs, sheet, ten: [gon(r) for r in xep_kw([r for r in rs if r["sheet"] == sheet and r["khoi"] == ten])]
+    rows = res["rows"]
+
+    tung = []
+    for a, ta in res.get("tung_asin", {}).items():
+        cac = {}
+        for sheet, ds in ta["bien_the"].items():
+            cac[sheet] = [{"ten": v["ten"], "rank": v["rank"], "root": v["root"], "so_kw": v["so_kw"], "sv": v["sv"],
+                           "kw": khoi(ta["rows"], sheet, v["ten"])} for v in sorted(ds, key=lambda v: (v["rank"], -v["sv"]))]
+            for kh in ("chưa phân loại", "Loại bỏ (negative)"):
+                kw = khoi(ta["rows"], sheet, kh)
+                if kw:
+                    cac[sheet].append({"ten": kh, "rank": None, "root": None, "so_kw": len(kw),
+                                       "sv": sum(r["sv"] or 0 for r in kw), "kw": kw, "phu": True})
+        tung.append({"asin": a, "ky": ta["ky"], "bien_the": cac})
+
+    so_sanh = {sheet: [{"ten": v["ten"], "so_asin": v["so_asin"], "nhom": v["nhom"], "rank": v["rank"],
+                        "per": {a: (v["per"][a] or {}).get("rank") for a in asins}, "sv": v["sv"], "so_kw": v["so_kw"],
+                        "bac": ["nhiều từ", "1 từ cụ thể", "1 từ rộng"][_bac2(v)[0]], "nhan": danh_gia.get(v["ten"], ""),
+                        "root": min((p for p in v["per"].values() if p), key=lambda p: p["rank"])["kw"]}
+                       for v in sorted(ds, key=lambda v: (-v["so_asin"], v["rank"], -v["sv"]))]
+               for sheet, ds in res["bien_the"].items()}
+
+    chon, bo = xep_uu_tien(res["bien_the"], danh_gia, loai)
+    the = lambda v, i=None: {"thu_tu": i, "ten": v["ten"], "sheet": v["sheet"], "so_asin": v["so_asin"], "rank": v["rank"],
+                             "per": {a: (v["per"][a] or {}).get("rank") for a in asins}, "sv": v["sv"], "so_kw": v["so_kw"],
+                             "nhan": v["nhan"], "kw": khoi(rows, v["sheet"], v["ten"])}
+    dem = {}
+    for r in rows:
+        dem.setdefault(r["sheet"], {}).setdefault(r["khoi"], 0)
+        dem[r["sheet"]][r["khoi"]] += 1
+    return {"NA": NA, "asins": asins, "tung_asin": tung, "so_sanh": so_sanh,
+            "chon": [the(v, i) for i, v in enumerate(chon, 1)], "loai": [the(v) for v in bo],
+            "dem": dem, "tong": len({r["keyword"] for r in rows})}
