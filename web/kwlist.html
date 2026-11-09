@@ -31,6 +31,7 @@ let L = null, BT = null, view = { q: "", asin: "", orn: false, sort: "sv", dir: 
 let tab = (location.hash.slice(1) || "chon").replace(/^asin-.*/, "asin"), asinChon = (location.hash.match(/^#asin-(\w+)/) || [])[1] || null;
 if (!TABS.some(([k]) => k === tab)) tab = "chon";
 let moHet = false;
+let KHOI = [];   // keyword của từng khối đang hiện, để nút "Sao chép" lấy ra (không chép tên biến thể)
 
 function toast(m, bad) { const t = $("#toast"); t.textContent = m; t.className = "toast show" + (bad ? " bad" : ""); clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", 2500); }
 
@@ -97,6 +98,7 @@ function render() {
     <div class="card section">
       <div class="section-head" style="flex-wrap:wrap">
         <div class="grow"><h2>Biến thể</h2><p>Rút từ chính dữ liệu từng ASIN (kw chứa ornament / gift rank 1–50), so giữa các ASIN, rồi chọn cho sản phẩm.</p></div>
+        <button class="btn sm" id="chep-het" type="button" title="Chép keyword của mọi biến thể trong tab này, mỗi dòng 1 keyword, không có tên biến thể">Sao chép tất cả</button>
         <button class="btn sm" id="mo-het" type="button">${moHet ? "Thu hết" : "Mở hết"}</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Các bước chia biến thể">
@@ -106,19 +108,43 @@ function render() {
     </div>`;
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { tab = b.dataset.tab; dongBoHash(); render(); });
   $("#mo-het").onclick = () => { moHet = !moHet; render(); };
+  $("#chep-het").onclick = () => {
+    // Tab So sánh không có khối: chép theo thứ tự đã chọn cho sản phẩm (bỏ biến thể bị loại)
+    const kw = tab === "tat-ca" ? rowsView().map(r => r.keyword)
+      : tab === "so-sanh" ? (BT?.chon || []).flatMap(v => v.kw.map(r => r.keyword))
+      : KHOI.filter(k => k.chinh).flatMap(k => k.kw);
+    chep([...new Set(kw)], tab === "tat-ca" ? "keyword đang lọc" : "keyword của các biến thể");
+  };
   renderTab();
 }
 
 function dongBoHash() { history.replaceState(null, "", "#" + (tab === "asin" && asinChon ? "asin-" + asinChon : tab)); }
 
+async function chep(kw, ten) {
+  if (!kw.length) return toast("Không có keyword để chép", true);
+  const text = kw.join("\n");
+  try { await navigator.clipboard.writeText(text); }
+  catch {   // trình duyệt chặn clipboard API: chép bằng ô ẩn
+    const t = Object.assign(document.createElement("textarea"), { value: text, style: "position:fixed;opacity:0" });
+    document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove();
+  }
+  toast(`Đã chép ${kw.length} ${ten}`);
+}
+
 function renderTab() {
   const el = $("#tab-body");
+  KHOI = [];
   if (tab === "tat-ca") return renderTatCa(el);
   if (!L.rows.length) { el.innerHTML = `<div class="empty"><h3>Chưa có keyword</h3><p>Chờ extension lấy Cerebro, hoặc tải file tay ở trang chính.</p></div>`; return; }
   if (!BT || BT.loi) { el.innerHTML = `<div class="note bad">${esc(BT?.loi || "Chưa chia được biến thể")}</div>`; return; }
   if (tab === "chon") renderChon(el);
   else if (tab === "so-sanh") renderSoSanh(el);
   else renderTungAsin(el);
+  el.querySelectorAll("[data-chep]").forEach(b => b.addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation();   // không gập/mở khối
+    const k = KHOI[+b.dataset.chep];
+    chep(k.kw, `keyword của "${k.ten}"`);
+  }));
   el.querySelectorAll("select.nhan").forEach(s => {
     s.addEventListener("click", e => e.stopPropagation());       // không gập/mở khối khi chọn nhãn
     s.addEventListener("change", () => datNhan(s.dataset.ten, s.value));
@@ -140,11 +166,12 @@ function bangKw(kw) {
       <td class="small" style="white-space:normal">${esc((r.neg || []).join("; "))}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
-function khoi({ so, ten, tag, nhan, mot, hai, kw, cls }) {
+function khoi({ so, ten, tag, nhan, mot, hai, kw, cls, chinh = true }) {
+  const i = KHOI.push({ ten, kw: kw.map(r => r.keyword), chinh }) - 1;
   return `<details class="vb ${cls || ""}" ${moHet ? "open" : ""}>
     <summary>
       <span class="vt"><span class="caret" aria-hidden="true"></span>${so != null ? `<span class="so">${so}.</span>` : ""}<span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}</span>
-      <span class="vm">${mot}${nhan !== undefined ? chonNhan(ten, nhan) : ""}</span>
+      <span class="vm">${mot}${nhan !== undefined ? chonNhan(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
       ${hai ? `<span class="vr">${hai}</span>` : ""}
     </summary>
     ${kw.length ? bangKw(kw) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
@@ -163,7 +190,7 @@ function renderChon(el) {
   }
   if (BT.loai.length) {
     html += `<div class="nhom-head">Loại: không sát sản phẩm</div>`;
-    for (const v of BT.loai) html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, cls: "loai", mot: soLieu(v), hai: rankAsin(v.per) });
+    for (const v of BT.loai) html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, cls: "loai", chinh: false, mot: soLieu(v), hai: rankAsin(v.per) });
   }
   if (!BT.chon.length && !BT.loai.length) html += `<div class="empty"><h3>Chưa rút được biến thể nào</h3><p>Không ASIN nào có keyword chứa ornament / gift trong top 1–50.</p></div>`;
   el.innerHTML = html;
@@ -188,7 +215,7 @@ function renderTungAsin(el) {
   el.innerHTML = `<div class="seg" role="group" aria-label="Chọn ASIN">${ds.map(x => `<button type="button" data-asin="${x.asin}" aria-pressed="${x.asin === asinChon}">${x.asin} · ${KY[x.ky] || x.ky}</button>`).join("")}</div>
     <p class="small muted" style="margin:0 0 12px">Biến thể của riêng ASIN này: rút từ kw chứa ornament / gift rank 1–50 của chính ASIN; rank tốt nhất là rank của kw biến thể trong ASIN này; kw của ASIN gom vào biến thể theo rule.</p>
     ${Object.entries(t.bien_the).map(([sheet, vs]) => `<div class="nhom-head">${SHEET[sheet]}: ${vs.filter(v => !v.phu).length} biến thể</div>` +
-      (vs.length ? vs.map(v => khoi({ ten: v.ten, kw: v.kw, cls: v.phu ? "phu" : "",
+      (vs.length ? vs.map(v => khoi({ ten: v.ten, kw: v.kw, cls: v.phu ? "phu" : "", chinh: !v.phu,
         mot: (v.rank != null ? `<span>rank tốt nhất <b>${v.rank}</b></span>` : "") + `<span><b>${fmt(v.sv)}</b> SV</span><span><b>${v.so_kw}</b> kw</span>`,
         hai: v.root ? `<span>root: <b>${esc(v.root)}</b></span>` : "" })).join("") : '<p class="small muted">Không có.</p>')).join("")}`;
   el.querySelectorAll("[data-asin]").forEach(b => b.onclick = () => { asinChon = b.dataset.asin; dongBoHash(); renderTab(); });
