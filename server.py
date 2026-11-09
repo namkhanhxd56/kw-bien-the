@@ -60,6 +60,15 @@ MAX_UPLOAD = 30 * 1024 * 1024
 store = Store(DATA)
 
 
+def tom_tat_capture() -> list[dict]:
+    """Các ngày có request do chế độ "Ghi lại" gửi về: tên file, số dòng, dung lượng."""
+    out = []
+    for f in sorted((DATA / "capture").glob("*.jsonl")):
+        with open(f, "rb") as fh:
+            out.append({"file": f.name, "so": sum(1 for _ in fh), "kb": round(f.stat().st_size / 1024)})
+    return out
+
+
 def luu_tru() -> dict:
     """Dữ liệu có nằm trên volume không. Không có volume thì mỗi lần deploy Railway là mất hết."""
     vol = os.environ.get("RAILWAY_VOLUME_MOUNT_PATH", "").rstrip("/")
@@ -218,6 +227,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._agent_next()
                 if path == "/api/agent/ping":
                     return self._agent_ping()
+                m = re.fullmatch(r"/api/agent/captures/(\d{4}-\d{2}-\d{2}\.jsonl)", path)
+                if m:
+                    return self._agent_capture_file(m.group(1))
             else:
                 if path == "/api/lists":
                     return self._create_list()
@@ -257,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True, "bo_loc": BO_LOC, "public_url": PUBLIC_URL,
             "agent": {"online": time.time() - seen < 90, "last_seen": seen or None, **store.agent_info},
             "luot_hom_nay": store.usage_today(), "gioi_han_ngay": DAILY_LIMIT,
-            "hang_doi": store.queue_size(), "luu_tru": luu_tru(),
+            "hang_doi": store.queue_size(), "luu_tru": luu_tru(), "capture": tom_tat_capture(),
         })
 
     def _products(self, refresh: bool):
@@ -393,6 +405,12 @@ class Handler(BaseHTTPRequestHandler):
             for it in items[:200]:
                 f.write(json.dumps(it, ensure_ascii=False) + "\n")
         self._json({"ok": True, "so": len(items[:200])})
+
+    def _agent_capture_file(self, ten: str):
+        # Request H10 đã ghi: chỉ trao cho ai có AGENT_TOKEN (dù đã ẩn cookie/token, vẫn là dữ liệu tài khoản)
+        if not self._agent_ok():
+            return self._err(401, "Sai AGENT_TOKEN")
+        return self._file(DATA / "capture" / ten)
 
     def _agent_next(self):
         if not self._agent_ok():
