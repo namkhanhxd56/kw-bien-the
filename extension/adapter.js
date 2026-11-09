@@ -21,7 +21,9 @@ export const ADAPTER = {
   version: "ui-2026-11-09",
   cerebroUrl: "https://members.helium10.com/cerebro-new",
 
-  async run(asin, filters) {
+  // Viết dạng `function` (không viết `async run() {}`): Chrome tiêm hàm bằng mã nguồn của nó, mà mã nguồn
+  // của method rút gọn không phải một hàm hợp lệ khi đứng riêng.
+  run: async function run(asin, filters) {
     const T0 = Date.now();
     const LOG = [];
     const log = m => LOG.push(`${((Date.now() - T0) / 1000).toFixed(1)}s ${m}`);
