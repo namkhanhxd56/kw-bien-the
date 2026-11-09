@@ -1,0 +1,7 @@
+# Dữ liệu chạy (bộ keyword, ảnh cache, job, request ghi lại): trên Railway nằm ở volume /data
+data/
+output/
+__pycache__/
+*.pyc
+.env
+.DS_Store

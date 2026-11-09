@@ -1,0 +1,208 @@
+// Nền của extension: hỏi tool KW Biến Thể có job Cerebro không, chạy job trong một tab
+// members.helium10.com chạy ngầm (dùng phiên đăng nhập H10 của Chrome này), gửi kết quả về.
+// Mỗi lần chỉ chạy 1 job, nghỉ giữa các job để không dồn request lên H10.
+import { ADAPTER, laTrangDangNhap } from "./adapter.js";
+
+const VERSION = chrome.runtime.getManifest().version;
+const MAC_DINH = { server: "http://localhost:8796", token: "", running: true, capture: false, nghi: 10 };
+const HET_GIO_JOB = 8 * 60 * 1000;   // server tự trả job về hàng đợi sau 10 phút
+const HET_GIO_TAB = 60 * 1000;
+
+let ban = false;
+let boDemCapture = [];
+let henCapture = null;
+
+// ---------------------------------------------------------------- cấu hình & trạng thái
+const cfg = () => chrome.storage.local.get(MAC_DINH);
+async function st() {
+  return (await chrome.storage.session.get({ st: { phase: "idle", h10: "unknown", job: null, last: null, error: null, captured: 0, tabId: null } })).st;
+}
+let hangGhi = Promise.resolve();   // ghi trạng thái lần lượt để các lần ghi không đè nhau
+function datSt(p) {
+  hangGhi = hangGhi.then(async () => {
+    const s = { ...(await st()), ...p, at: Date.now() };
+    await chrome.storage.session.set({ st: s });
+    return s;
+  });
+  return hangGhi;
+}
+
+async function api(path, { method = "GET", body } = {}) {
+  const c = await cfg(), s = await st();
+  let r;
+  try {
+    r = await fetch(c.server.replace(/\/$/, "") + path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Agent-Token": c.token,
+        "X-Agent-Version": VERSION,
+        "X-Agent-H10": s.h10,
+        "X-Agent-Ready": ADAPTER.ready ? "1" : "0",
+        "X-Agent-Running": c.running ? "1" : "0",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    await datSt({ tool: "loi" });
+    throw new Error("Không kết nối được tool ở " + c.server);
+  }
+  const d = await r.json().catch(() => ({}));
+  await datSt({ tool: r.status === 401 ? "token" : "ok" });
+  if (!r.ok || d.ok === false) throw new Error(d.error || `Tool trả lỗi ${r.status}`);
+  return d;
+}
+
+// ---------------------------------------------------------------- tab Cerebro
+function choTabTai(tabId) {
+  return new Promise((ok, loi) => {
+    const het = setTimeout(() => { chrome.tabs.onUpdated.removeListener(nghe); loi(new Error("Trang H10 tải quá lâu")); }, HET_GIO_TAB);
+    function nghe(id, info) {
+      if (id === tabId && info.status === "complete") { clearTimeout(het); chrome.tabs.onUpdated.removeListener(nghe); ok(); }
+    }
+    chrome.tabs.onUpdated.addListener(nghe);
+    chrome.tabs.get(tabId).then(t => { if (t.status === "complete") nghe(tabId, { status: "complete" }); }).catch(loi);
+  });
+}
+
+async function moTab() {
+  const s = await st();
+  if (s.tabId != null) {
+    try {
+      const t = await chrome.tabs.get(s.tabId);
+      if (/^https:\/\/members\.helium10\.com\//.test(t.url || t.pendingUrl || "")) { await choTabTai(t.id); return t.id; }
+    } catch { /* tab đã đóng */ }
+  }
+  const t = await chrome.tabs.create({ url: ADAPTER.cerebroUrl, active: false });
+  await datSt({ tabId: t.id });
+  await choTabTai(t.id);
+  return t.id;
+}
+
+async function dongTab() {
+  const s = await st();
+  if (s.tabId == null) return;
+  await chrome.tabs.remove(s.tabId).catch(() => {});
+  await datSt({ tabId: null });
+}
+
+async function chayTrongTab(tabId, func, args = []) {
+  const [kq] = await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", func, args });
+  return kq?.result;
+}
+
+// ---------------------------------------------------------------- vòng nhận job
+async function tick() {
+  if (ban) return;
+  ban = true;
+  try {
+    const c = await cfg();
+    const p = await api("/api/agent/ping");
+    if (!c.running || !ADAPTER.ready || !p.cho || p.het_luot) {
+      await dongTab();
+      await datSt({ phase: !c.running ? "paused" : !ADAPTER.ready ? "no_adapter" : p.het_luot ? "limit" : "idle", error: null });
+      return;
+    }
+
+    // Có job chờ: kiểm tra phiên H10 trước khi nhận, để không mất lượt vì chưa đăng nhập.
+    // Đã biết là chưa đăng nhập thì 5 phút mới mở tab thử lại (mở trang H10 bất kỳ sau khi
+    // đăng nhập sẽ báo về ngay qua capture-relay.js).
+    const s = await st();
+    if (s.h10 === "logged_out" && Date.now() - (s.h10At || 0) < 5 * 60 * 1000) {
+      await datSt({ phase: "idle", error: "H10 chưa đăng nhập trên Chrome này" });
+      return;
+    }
+    const tabId = await moTab();
+    if (await chayTrongTab(tabId, laTrangDangNhap)) {
+      await dongTab();
+      await datSt({ phase: "idle", h10: "logged_out", h10At: Date.now(), error: "H10 chưa đăng nhập trên Chrome này" });
+      await api("/api/agent/ping");
+      return;
+    }
+    await datSt({ h10: "ok", h10At: Date.now() });
+
+    const { job } = await api("/api/agent/next");
+    if (!job) { await datSt({ phase: "idle", error: null }); return; }
+    await chayJob(tabId, job);
+    setTimeout(tick, c.nghi * 1000);
+  } catch (e) {
+    await datSt({ phase: "error", error: String(e.message || e) });
+  } finally {
+    ban = false;
+  }
+}
+
+async function chayJob(tabId, job) {
+  await datSt({ phase: "running", job: { id: job.id, asin: job.asin, period: job.filters.period, start: Date.now() }, error: null });
+  const giuThuc = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);   // giữ service worker sống
+  try {
+    const kq = await Promise.race([
+      chayTrongTab(tabId, ADAPTER.run, [job.asin, job.filters]),
+      new Promise((_, loi) => setTimeout(() => loi(new Error("Cerebro chạy quá 8 phút")), HET_GIO_JOB)),
+    ]);
+    if (!kq?.ok) {
+      if (kq?.login) await datSt({ h10: "logged_out", h10At: Date.now() });
+      throw new Error(kq?.error || "Bộ lấy Cerebro không trả kết quả");
+    }
+    const d = await api(`/api/agent/jobs/${job.id}/result`, { method: "POST", body: { period_used: kq.period_used, rows: kq.rows } });
+    await datSt({ phase: "idle", job: null, last: { asin: job.asin, period: kq.period_used, so: kq.rows.length, tiep: d.tiep || null, at: Date.now() } });
+  } catch (e) {
+    const msg = String(e.message || e);
+    await api(`/api/agent/jobs/${job.id}/fail`, { method: "POST", body: { error: msg } }).catch(() => {});
+    await datSt({ phase: "error", job: null, error: msg, last: { asin: job.asin, loi: msg, at: Date.now() } });
+  } finally {
+    clearInterval(giuThuc);
+  }
+}
+
+// ---------------------------------------------------------------- ghi lại request (dò API)
+function guiCaptureSau() {
+  if (henCapture) return;
+  henCapture = setTimeout(async () => {
+    henCapture = null;
+    const items = boDemCapture.splice(0, 200);
+    if (!items.length) return;
+    try {
+      await api("/api/agent/capture", { method: "POST", body: { items } });
+      await datSt({ captured: (await st()).captured + items.length });
+    } catch (e) {
+      await datSt({ error: "Không gửi được request đã ghi: " + (e.message || e) });
+    }
+    if (boDemCapture.length) guiCaptureSau();
+  }, 2000);
+}
+
+// ---------------------------------------------------------------- sự kiện
+chrome.runtime.onMessage.addListener((m, sender, tra) => {
+  if (m?.type === "capture") {
+    if (boDemCapture.length < 1000) boDemCapture.push(m.item);
+    guiCaptureSau();
+    return false;
+  }
+  if (m?.type === "h10page") {
+    datSt({ h10: m.login ? "logged_out" : "ok", h10At: Date.now() });
+    return false;
+  }
+  if (m?.type === "state") {
+    Promise.all([cfg(), st()]).then(([c, s]) => tra({ cfg: c, st: s, adapter: { ready: ADAPTER.ready, version: ADAPTER.version }, version: VERSION }));
+    return true;
+  }
+  if (m?.type === "save") {
+    chrome.storage.local.set(m.cfg).then(() => { tick(); tra({ ok: true }); });
+    return true;
+  }
+  if (m?.type === "tick") {
+    tick().then(() => st()).then(s => tra({ st: s }));
+    return true;
+  }
+  if (m?.type === "openCerebro") {
+    chrome.tabs.create({ url: ADAPTER.cerebroUrl, active: true }).then(() => tra({ ok: true }));
+    return true;
+  }
+  return false;
+});
+
+chrome.alarms.onAlarm.addListener(a => { if (a.name === "poll") tick(); });
+chrome.alarms.get("poll").then(a => { if (!a) chrome.alarms.create("poll", { periodInMinutes: 0.5 }); });
+chrome.runtime.onStartup.addListener(tick);
+chrome.runtime.onInstalled.addListener(tick);

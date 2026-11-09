@@ -1,0 +1,5 @@
+# Code dùng cú pháp `str | None` (3.10+): ghim 3.12 để Nixpacks không tự chọn bản cũ.
+providers = ["python"]
+
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.12"

@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KW Biến Thể</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/authui.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><b>KW Biến Thể</b><span>Lấy keyword ASIN đối thủ từ Cerebro</span></div>
+  <div class="spacer"></div>
+  <div class="stat" id="st-agent" title="Extension lấy Cerebro trên Chrome"><span class="dot"></span><span>Extension: …</span></div>
+  <div class="stat hide-sm" id="st-luot">Lượt H10 hôm nay: …</div>
+  <div class="stat hide-sm" id="st-hang">Hàng đợi: …</div>
+</header>
+
+<div class="layout">
+  <aside class="side">
+    <div class="side-head">
+      <div class="label-row">
+        <b>Mã trên Lark</b>
+        <button class="btn sm" id="btn-reload" title="Đọc lại bảng PPC - Phân tích Keyword">Tải lại từ Lark</button>
+      </div>
+      <input class="input" id="q" type="search" placeholder="Tìm mã, tên mẫu, niche" aria-label="Tìm mã">
+    </div>
+    <div class="side-list" id="list" role="listbox" aria-label="Danh sách mã"></div>
+  </aside>
+
+  <main class="main"><div class="main-inner" id="detail"></div></main>
+</div>
+
+<dialog id="dlg-confirm">
+  <div class="d-body"><h3 id="dc-title"></h3><div id="dc-text" class="small"></div></div>
+  <div class="d-foot"><button class="btn" value="no" id="dc-no">Huỷ</button><button class="btn primary" id="dc-yes"></button></div>
+</dialog>
+<dialog id="dlg-zoom" class="zoom"><img alt="Ảnh sản phẩm phóng to" id="zoom-img"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const ASIN_RE = /^B0[A-Z0-9]{8}$/;
+const KY = {"2025-12": "12/2025", "current": "kỳ hiện tại"};
+const TT = {
+  chua_lay: ["Chưa lấy", ""], cho: ["Chờ extension", "info"], dang_lay: ["Đang lấy", "info"],
+  xong: ["Xong", "ok"], rong: ["Không có dữ liệu", "warn"], loi: ["Lỗi", "bad"],
+};
+
+let S = { products: [], sel: null, status: null, poll: null, draft: {} };
+
+async function api(path, opt = {}) {
+  const r = await fetch(path, opt);
+  const d = await r.json().catch(() => ({ ok: false, error: "Máy chủ trả về dữ liệu lạ" }));
+  if (!r.ok || d.ok === false) throw new Error(d.error || `Lỗi ${r.status}`);
+  return d;
+}
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+
+function toast(msg, bad) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", bad ? 5000 : 2500);
+}
+
+function confirmBox(title, html, yes) {
+  return new Promise(res => {
+    const d = $("#dlg-confirm");
+    $("#dc-title").textContent = title; $("#dc-text").innerHTML = html; $("#dc-yes").textContent = yes;
+    $("#dc-yes").onclick = () => { d.close(); res(true); };
+    $("#dc-no").onclick = () => { d.close(); res(false); };
+    d.onclose = () => res(false);
+    d.showModal();
+  });
+}
+
+// ---------------------------------------------------------------- trạng thái chung
+async function loadStatus() {
+  try {
+    const s = await api("/api/status"); S.status = s;
+    const a = $("#st-agent");
+    const g = s.agent, vang = g.online && (g.h10 === "logged_out" || !g.san_sang || !g.nhan_job);
+    a.querySelector(".dot").className = "dot " + (!g.online ? "off" : vang ? "warn" : "on");
+    a.querySelector("span:last-child").textContent = "Extension: " + (!g.online ? "chưa kết nối"
+      : g.h10 === "logged_out" ? "H10 chưa đăng nhập"
+      : !g.san_sang ? "chưa có bộ lấy Cerebro"
+      : !g.nhan_job ? "đang tạm dừng" : "đang kết nối");
+    $("#st-luot").textContent = `Lượt H10 hôm nay: ${s.luot_hom_nay}/${s.gioi_han_ngay}`;
+    $("#st-hang").textContent = `Hàng đợi: ${s.hang_doi}`;
+  } catch (e) { /* topbar giữ nguyên */ }
+}
+
+// ---------------------------------------------------------------- danh sách mã
+async function loadProducts(refresh) {
+  if (!S.products.length) $("#list").innerHTML = Array(4).fill('<div class="item"><div class="thumb skeleton"></div><div><div class="skeleton" style="height:12px;width:60%"></div><div class="skeleton" style="height:10px;width:85%;margin-top:6px"></div></div></div>').join("");
+  try {
+    const d = await api("/api/products" + (refresh ? "?refresh=1" : ""));
+    S.products = d.products;
+    renderList();
+    const want = S.sel || decodeURIComponent(location.hash.slice(1)) || (S.products[0] || {}).ma;
+    if (want && S.products.some(p => p.ma === want)) select(want, true);
+    else if (!S.products.length) $("#detail").innerHTML = `<div class="card empty"><h3>Bảng chưa có mã nào</h3><p>Thêm mã vào bảng "PPC - Phân tích Keyword" trên Lark rồi bấm Tải lại từ Lark.</p></div>`;
+    if (refresh) toast("Đã đọc lại bảng Lark");
+  } catch (e) {
+    $("#list").innerHTML = `<div class="note bad" style="margin:8px">Không đọc được Lark: ${esc(e.message)}</div>`;
+  }
+}
+
+function boBadge(p) {
+  if (!p.bo) return '<span class="badge">Chưa tạo bộ</span>';
+  const n = p.bo.asins.length, x = p.bo.so_xong;
+  if (p.bo.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) return `<span class="badge info">Đang lấy ${x}/${n}</span>`;
+  return `<span class="badge ${x === n && n ? "ok" : ""}">Keyword ${x}/${n}</span>`;
+}
+
+function renderList() {
+  const q = $("#q").value.trim().toLowerCase();
+  const items = S.products.filter(p => !q || [p.ma, p.ten_mau, p.niche].join(" ").toLowerCase().includes(q));
+  $("#list").innerHTML = items.map(p => {
+    const n = p.asin_doi_thu.length;
+    const thumb = p.anh_cache ? `<img class="thumb" src="/api/products/${encodeURIComponent(p.ma)}/image?cached=1" alt="">` : `<div class="thumb">${esc(p.ma.slice(0, 3))}</div>`;
+    return `<button class="item ${p.ma === S.sel ? "active" : ""}" data-ma="${esc(p.ma)}" role="option" aria-selected="${p.ma === S.sel}">
+      ${thumb}
+      <div style="min-width:0">
+        <div class="t1">${esc(p.ma)}</div>
+        <div class="t2">${esc(p.ten_mau || "—")}</div>
+        <div class="t3"><span class="badge ${n < 3 ? "bad" : ""}">${n} ASIN</span>${boBadge(p)}${p.da_phan_tich ? '<span class="badge ok">Đã xem ảnh</span>' : ""}</div>
+      </div></button>`;
+  }).join("") || '<div class="empty small">Không có mã khớp</div>';
+}
+
+$("#list").addEventListener("click", e => { const b = e.target.closest(".item"); if (b) select(b.dataset.ma); });
+$("#q").addEventListener("input", renderList);
+$("#btn-reload").addEventListener("click", () => loadProducts(true));
+
+// ---------------------------------------------------------------- chi tiết mã
+function product() { return S.products.find(p => p.ma === S.sel); }
+
+async function select(ma, keepScroll) {
+  S.sel = ma; history.replaceState(null, "", "#" + encodeURIComponent(ma));
+  renderList();
+  const p = product();
+  const bo = p.bo;
+  S.draft = {
+    asins: bo ? [...bo.asins] : [...p.asin_doi_thu],
+    niche: bo ? bo.niche : (p.niche || "").toLowerCase(),
+    product: bo ? bo.product : (/ornament/i.test(p.ten_mau) ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
+  };
+  renderDetail();
+  if (!keepScroll) window.scrollTo(0, 0);
+  loadAnalysis(ma);
+  if (bo) refreshList(bo.slug);
+}
+
+function renderDetail() {
+  const p = product();
+  $("#detail").innerHTML = `
+    <div class="page-head">
+      <div class="grow" style="flex:1;min-width:0">
+        <h1>${esc(p.ma)} · ${esc(p.ten_mau || "Chưa có tên mẫu")}</h1>
+        <div class="sub small">ASIN mẫu <span class="mono">${esc(p.asin_mau || "—")}</span></div>
+      </div>
+    </div>
+
+    <section class="card section" aria-labelledby="h-s1">
+      <div class="section-head"><span class="step">1</span><div class="grow"><h2 id="h-s1">Phân tích ảnh sản phẩm</h2><p>Chỉ tin ảnh. Tên mẫu, niche, chất liệu trên Lark chỉ để tham khảo.</p></div><span id="an-state" class="badge">Chưa phân tích</span></div>
+      <div class="section-body grid-2">
+        <div>
+          <div class="photo" id="photo"><div class="skeleton" style="width:100%;height:100%"></div></div>
+          <div class="row" style="margin-top:8px"><span class="small muted">Ảnh main từ 🌼 2026 Product Flow</span></div>
+        </div>
+        <div>
+          <div class="ref"><h4>Dữ liệu Lark · tham khảo</h4><dl>
+            <dt>Tên mẫu</dt><dd>${esc(p.ten_mau || "—")}</dd>
+            <dt>Niche</dt><dd>${esc(p.niche || "—")}</dd>
+            <dt>Chất liệu</dt><dd>${esc(p.chat_lieu || "—")}</dd>
+          </dl></div>
+          <form id="an-form" class="form-grid" autocomplete="off">
+            ${fld("san_pham", "Sản phẩm là gì", "vd: ornament treo cây, phẳng 2D")}
+            ${fld("chu_the", "Chủ thể / hình in", "vd: cô gái tập gymnastics, tư thế xoạc")}
+            ${fld("chat_lieu", "Chất liệu nhìn thấy", "vd: acrylic in UV, viền trắng")}
+            ${fld("hinh_dang", "Hình dạng, kiểu treo", "vd: cắt theo viền hình, dây ruy băng đỏ")}
+            ${fld("mau", "Màu chủ đạo", "")}
+            ${fld("doi_tuong", "Đối tượng khách", "vd: bé gái tập thể dục dụng cụ, mẹ mua tặng")}
+            ${fld("chi_tiet", "Chữ, chi tiết đặc trưng", "vd: có chỗ cá nhân hoá tên, năm 2025", true)}
+            ${fld("ket_luan", "Kết luận sơ bộ: niche thật của sản phẩm", "Dòng này dùng để chọn biến thể sát ở bước sau", true)}
+            <div class="full row end">
+              <span class="small muted" id="an-saved"></span>
+              <button type="button" class="btn" disabled title="Chưa bật — cần chốt cách gọi AI">Phân tích bằng AI</button>
+              <button type="submit" class="btn primary" data-cap="kw.edit" data-need="edit">Lưu phân tích</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="card section" aria-labelledby="h-s2">
+      <div class="section-head"><span class="step">2</span><div class="grow"><h2 id="h-s2">Lấy keyword ASIN đối thủ (Cerebro)</h2><p>Mỗi ASIN chạy 1 lần, kết quả gộp thành một bộ keyword có link riêng.</p></div></div>
+      <div class="section-body stack" id="s2"></div>
+    </section>
+
+    <section class="card section" aria-labelledby="h-s3">
+      <div class="section-head"><span class="step off">3</span><div class="grow"><h2 id="h-s3">Xác định biến thể</h2><p>Bước sau: chia biến thể theo quy tắc PDF + negative, dựa trên ảnh ở bước 1.</p></div><span class="badge">Chưa làm</span></div>
+    </section>`;
+  loadPhoto(p);
+  renderS2();
+  $("#an-form").addEventListener("submit", saveAnalysis);
+}
+
+function fld(name, label, hint, full) {
+  const tag = full ? `<textarea class="input" id="an-${name}" name="${name}" rows="2"></textarea>` : `<input class="input" id="an-${name}" name="${name}">`;
+  return `<div class="field ${full ? "full" : ""}"><label for="an-${name}">${label}</label>${tag}${hint ? `<span class="hint">${esc(hint)}</span>` : ""}</div>`;
+}
+
+function loadPhoto(p) {
+  const box = $("#photo");
+  if (!p.co_anh) { box.innerHTML = '<span class="small">Lark chưa có ảnh main</span>'; return; }
+  const img = new Image();
+  img.alt = `Ảnh sản phẩm ${p.ma}`;
+  img.onload = () => {
+    box.innerHTML = ""; box.appendChild(img);
+    img.onclick = () => { $("#zoom-img").src = img.src; $("#dlg-zoom").showModal(); };
+    if (!p.anh_cache) { p.anh_cache = true; renderList(); }
+  };
+  img.onerror = () => box.innerHTML = '<div class="small" style="padding:12px;text-align:center">Không tải được ảnh từ Lark.<br><button class="btn sm" style="margin-top:8px" id="retry-img">Thử lại</button></div>';
+  img.src = `/api/products/${encodeURIComponent(p.ma)}/image`;
+  box.addEventListener("click", e => { if (e.target.id === "retry-img") loadPhoto(p); });
+}
+$("#dlg-zoom").addEventListener("click", () => $("#dlg-zoom").close());
+
+async function loadAnalysis(ma) {
+  try {
+    const { analysis: a } = await api("/api/analysis/" + encodeURIComponent(ma));
+    if (S.sel !== ma) return;
+    for (const [k, v] of Object.entries(a)) { const el = $("#an-" + k); if (el) el.value = v; }
+    setAnState(a);
+  } catch (e) { toast("Không đọc được phân tích: " + e.message, true); }
+}
+
+function setAnState(a) {
+  const done = !!(a && a.ket_luan);
+  $("#an-state").className = "badge " + (done ? "ok" : "");
+  $("#an-state").textContent = done ? "Đã phân tích" : "Chưa phân tích";
+  $("#an-saved").textContent = a && a.updated_at ? "Lưu lúc " + new Date(a.updated_at * 1000).toLocaleString("vi-VN") : "";
+}
+
+async function saveAnalysis(e) {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target).entries());
+  try {
+    const { analysis } = await post("/api/analysis/" + encodeURIComponent(S.sel), data);
+    setAnState(analysis); product().da_phan_tich = !!analysis.ket_luan; renderList();
+    toast("Đã lưu phân tích ảnh");
+  } catch (err) { toast("Chưa lưu được: " + err.message, true); }
+}
+
+// ---------------------------------------------------------------- bước 2
+function slugify(s) { return (s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "d").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
+function tenBo() {
+  const p = product(), d = S.draft;
+  let ten = d.niche.trim();
+  if (d.product.trim() && !slugify(ten).endsWith(slugify(d.product))) ten = (ten + " " + d.product.trim()).trim();
+  const slug = (p.ma.replace(/[^A-Za-z0-9]/g, "") + "-" + slugify(ten)).replace(/-+$/, "");
+  return { ten: `${p.ma} - ${ten}`, slug, link: `${S.status ? S.status.public_url : location.origin}/kw-list/${slug}` };
+}
+
+function renderS2() {
+  const p = product(), bo = p.bo, d = S.draft, f = S.status ? S.status.bo_loc : null;
+  const extra = d.asins.filter(a => !p.asin_doi_thu.includes(a));
+  const t = tenBo();
+  const daTao = bo && bo.slug === t.slug && JSON.stringify(bo.asins) === JSON.stringify(d.asins);
+  const warn = [];
+  if (p.asin_trung.length) warn.push(`Ô ASIN trên Lark bị trùng: <span class="mono">${p.asin_trung.map(esc).join(", ")}</span> (đã bỏ bản trùng).`);
+  if (d.asins.length < 3) warn.push(`Mới có ${d.asins.length} ASIN đối thủ, cần tối thiểu 3. Bổ sung ở Lark (cột "ASIN đối thủ (>=3)") hoặc thêm tạm bên dưới.`);
+  if (extra.length) warn.push(`ASIN thêm tạm (viền đứt) chỉ lưu trong tool, chưa ghi về Lark.`);
+
+  $("#s2").innerHTML = `
+    <div>
+      <div class="small muted" style="margin-bottom:6px">Bộ lọc Cerebro (cố định)</div>
+      <div class="filters">
+        <span class="filter">Kỳ <b>12/2025</b> · không có kết quả thì lấy <b>kỳ hiện tại</b></span>
+        <span class="filter"><b>Exclude variations</b></span>
+        <span class="filter">Search volume <b>≥ ${f ? f.search_volume_min : 50}</b></span>
+        <span class="filter">Organic rank <b>≥ ${f ? f.organic_rank_min : 1}</b></span>
+        <span class="filter">Mỗi ASIN <b>1 lần chạy</b></span>
+      </div>
+    </div>
+
+    <div>
+      <div class="field"><label>ASIN đối thủ (${d.asins.length})</label></div>
+      <div class="chips" id="chips" style="margin:6px 0 8px">
+        ${d.asins.map(a => `<span class="chip ${p.asin_doi_thu.includes(a) ? "" : "added"}">${a}<button type="button" data-rm="${a}" aria-label="Bỏ ${a}">×</button></span>`).join("") || '<span class="small muted">Chưa có ASIN nào</span>'}
+      </div>
+      <form class="row" id="add-asin" autocomplete="off">
+        <input class="input mono" id="new-asin" placeholder="B0XXXXXXXX" style="max-width:200px" aria-label="Thêm ASIN đối thủ">
+        <button class="btn sm" type="submit">Thêm ASIN</button>
+        <span class="small" id="asin-err" style="color:var(--bad)"></span>
+      </form>
+    </div>
+    ${warn.map(w => `<div class="note warn">${w}</div>`).join("")}
+
+    <div class="form-grid">
+      <div class="field"><label for="in-niche">Niche của bộ keyword</label><input class="input" id="in-niche" value="${esc(d.niche)}"><span class="hint">Lấy theo kết luận ảnh ở bước 1 nếu khác Lark</span></div>
+      <div class="field"><label for="in-product">Loại sản phẩm</label><input class="input" id="in-product" value="${esc(d.product)}"><span class="hint">vd: ornament</span></div>
+      <div class="field full"><label>Tên bộ keyword</label>
+        <div class="linkbox"><span class="url" id="pv-link">${esc(t.link)}</span><span class="badge" id="pv-ten">${esc(t.ten)}</span></div>
+      </div>
+    </div>
+
+    <div class="row end">
+      ${bo && !daTao ? '<span class="small muted">Đã đổi ASIN hoặc tên so với bộ đã tạo</span>' : ""}
+      <button class="btn primary" id="btn-fetch" data-cap="kw.edit" data-need="edit" ${d.asins.length < 3 || !d.niche.trim() ? "disabled" : ""}>${bo ? "Lưu & lấy keyword còn thiếu" : "Tạo bộ & lấy keyword"}</button>
+    </div>
+    <div id="bo-box">${bo ? boHtml(bo) : ""}</div>`;
+
+  $("#chips").addEventListener("click", e => {
+    const a = e.target.dataset.rm; if (!a) return;
+    S.draft.asins = S.draft.asins.filter(x => x !== a); renderS2();
+  });
+  $("#add-asin").addEventListener("submit", e => {
+    e.preventDefault();
+    const a = $("#new-asin").value.trim().toUpperCase();
+    if (!ASIN_RE.test(a)) { $("#asin-err").textContent = "ASIN có dạng B0 + 8 ký tự, vd B0FKMNC7R9"; return; }
+    if (S.draft.asins.includes(a)) { $("#asin-err").textContent = "ASIN này đã có trong danh sách"; return; }
+    S.draft.asins.push(a); renderS2(); $("#new-asin").focus();
+  });
+  $("#new-asin").addEventListener("input", () => $("#asin-err").textContent = "");
+  for (const k of ["niche", "product"]) $("#in-" + k).addEventListener("input", e => {
+    S.draft[k] = e.target.value; const t = tenBo();
+    $("#pv-link").textContent = t.link; $("#pv-ten").textContent = t.ten;
+    $("#btn-fetch").disabled = S.draft.asins.length < 3 || !S.draft.niche.trim();
+  });
+  $("#btn-fetch").addEventListener("click", createAndFetch);
+  bindBo();
+}
+
+function boHtml(bo) {
+  const rows = bo.trang_thai_asin.map(a => {
+    const [lbl, cls] = TT[a.trang_thai] || [a.trang_thai, ""];
+    let ky = a.period_used ? KY[a.period_used] : (a.period_dang_thu ? "đang thử " + KY[a.period_dang_thu] : "—");
+    if (a.period_used === "current") ky = "kỳ hiện tại (12/2025 không có)";
+    const ghi = [...(a.loi ? [`<span style="color:var(--bad)">${esc(a.loi)}</span>`] : []), ...a.canh_bao.map(c => `<span style="color:var(--warn)">${esc(c)}</span>`)];
+    const busy = a.trang_thai === "cho" || a.trang_thai === "dang_lay";
+    return `<tr class="${ghi.length ? "has-sub" : ""}">
+      <td class="mono">${a.asin}</td>
+      <td><span class="badge ${cls}">${lbl}</span></td>
+      <td>${ky}</td>
+      <td class="num">${a.so_kw ? a.so_kw.toLocaleString("vi-VN") : "—"}</td>
+      <td>${a.nguon === "h10" ? "H10 tự động" : a.nguon === "file" ? "File tải tay" : "—"}</td>
+      <td><div class="row nowrap">
+        ${busy ? `<button class="btn sm" data-cancel="${a.asin}" data-cap="kw.edit" data-need="edit">Huỷ chờ</button>` : `<button class="btn sm" data-refetch="${a.asin}" data-cap="kw.edit" data-need="edit">${a.trang_thai === "chua_lay" ? "Lấy" : "Lấy lại"}</button>`}
+        <label class="btn sm" title="Tải file Cerebro đã export thay cho extension">Tải file tay<input type="file" accept=".xlsx,.csv" data-up="${a.asin}" data-cap="kw.edit" data-need="edit" hidden></label>
+      </div></td></tr>
+      ${ghi.length ? `<tr class="sub"><td colspan="6" class="small">${ghi.join(" · ")}</td></tr>` : ""}`;
+  }).join("");
+  const n = bo.asins.length, x = bo.so_xong;
+  return `
+    <div class="row" style="justify-content:space-between;margin:4px 0 8px">
+      <b>Bộ keyword · ${x}/${n} ASIN đã có dữ liệu</b>
+      ${S.status && !(S.status.agent.online && S.status.agent.san_sang && S.status.agent.nhan_job) && bo.trang_thai_asin.some(a => a.trang_thai === "cho") ? '<span class="badge warn">Extension chưa nhận job: job đang chờ, có thể tải file tay</span>' : ""}
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ASIN</th><th>Trạng thái</th><th>Kỳ dữ liệu</th><th class="num">Keyword</th><th>Nguồn</th><th>Thao tác</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="row" style="margin-top:8px" id="up-period-row">
+      <span class="small muted">File tải tay thuộc kỳ:</span>
+      <select class="input" id="up-period" style="width:auto;height:28px"><option value="2025-12">12/2025</option><option value="current">Kỳ hiện tại</option></select>
+    </div>
+    <div style="margin-top:14px">
+      <div class="field"><label>Link bộ keyword</label></div>
+      <div class="linkbox" style="margin-top:6px">
+        <span class="url">${esc(bo.link)}</span>
+        <button class="btn sm" data-copy="${esc(bo.link)}">Sao chép</button>
+        <a class="btn sm" href="/kw-list/${encodeURIComponent(bo.slug)}" target="_blank" rel="noopener">Mở</a>
+        <button class="btn sm" id="btn-lark" data-cap="kw.lark" data-need="edit" ${x ? "" : "disabled title='Chưa có ASIN nào lấy xong'"}>Ghi link vào Lark</button>
+      </div>
+      ${product().link_kw ? `<div class="small muted" style="margin-top:6px">Lark đang ghi: <span class="mono">${esc(product().link_kw)}</span></div>` : ""}
+    </div>`;
+}
+
+function bindBo() {
+  const box = $("#bo-box"); if (!box) return;
+  box.onclick = async e => {
+    const t = e.target;
+    if (t.dataset.refetch) return fetchAsins([t.dataset.refetch], true);
+    if (t.dataset.cancel) {
+      try { const d = await post(`/api/lists/${product().bo.slug}/cancel`, { asins: [t.dataset.cancel] }); setBo(d.list); } catch (er) { toast(er.message, true); }
+    }
+    if (t.dataset.copy) { navigator.clipboard.writeText(t.dataset.copy).then(() => toast("Đã sao chép link")); }
+    if (t.id === "btn-lark") writeLark();
+  };
+  box.onchange = e => { if (e.target.dataset.up) upload(e.target.dataset.up, e.target.files[0]); };
+}
+
+async function createAndFetch() {
+  const p = product(), d = S.draft, btn = $("#btn-fetch");
+  btn.disabled = true; btn.textContent = "Đang xếp job…";
+  try {
+    const r = await post("/api/lists", { ma: p.ma, niche: d.niche, product: d.product, asins: d.asins });
+    setBo(r.list, true);
+    await fetchAsins(null, false);
+  } catch (e) { toast(e.message, true); renderS2(); }
+}
+
+async function fetchAsins(asins, layLai) {
+  const bo = product().bo;
+  try {
+    const r = await post(`/api/lists/${bo.slug}/fetch`, { asins, lay_lai: layLai });
+    setBo(r.list);
+    toast(r.xep_hang.length ? `Đã xếp ${r.xep_hang.length} ASIN vào hàng đợi` : "Các ASIN đã có dữ liệu, không xếp thêm");
+    loadStatus();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function upload(asin, file) {
+  if (!file) return;
+  const bo = product().bo, period = $("#up-period").value;
+  try {
+    const r = await api(`/api/lists/${bo.slug}/upload?asin=${asin}&period=${period}&filename=${encodeURIComponent(file.name)}`, { method: "POST", body: file });
+    setBo(r.list);
+    toast(`${asin}: đã nhận ${r.so_kw} keyword` + (r.canh_bao.length ? " · có cảnh báo" : ""), r.canh_bao.length > 0);
+  } catch (e) { toast(`${asin}: ${e.message}`, true); }
+}
+
+async function writeLark() {
+  const p = product(), bo = p.bo;
+  const ok = await confirmBox("Ghi link vào Lark?",
+    `Ghi vào cột <b>Link bộ Keyword</b> của mã <b>${esc(p.ma)}</b> trong bảng PPC - Phân tích Keyword:<br><span class="mono">${esc(bo.link)}</span>` +
+    (p.link_kw && p.link_kw !== bo.link ? `<br><br>Giá trị cũ sẽ bị thay: <span class="mono">${esc(p.link_kw)}</span>` : ""), "Ghi vào Lark");
+  if (!ok) return;
+  try { const r = await post(`/api/lists/${bo.slug}/lark-link`); p.link_kw = r.link; renderS2(); toast("Đã ghi link vào Lark"); }
+  catch (e) { toast(e.message, true); }
+}
+
+function setBo(list, resetDraft) {
+  const p = product(); p.bo = list;
+  if (resetDraft) S.draft.asins = [...list.asins];
+  // khi đang chờ job chỉ vẽ lại bảng trạng thái, để ô niche/ASIN không mất con trỏ
+  const box = $("#bo-box");
+  if (box && box.innerHTML && !resetDraft) { box.innerHTML = boHtml(list); bindBo(); }
+  else renderS2();
+  renderList(); schedulePoll();
+}
+
+async function refreshList(slug) {
+  try { const d = await api("/api/lists/" + encodeURIComponent(slug) + "?rows=0"); if (product().bo && product().bo.slug === slug) setBo(d.list); }
+  catch (e) { /* giữ trạng thái cũ */ }
+}
+
+function schedulePoll() {
+  clearTimeout(S.poll);
+  const bo = product() && product().bo;
+  if (bo && bo.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) {
+    S.poll = setTimeout(() => { loadStatus(); refreshList(bo.slug); }, 4000);
+  }
+}
+
+// Nút thiếu quyền mờ đi mỗi khi phần chi tiết vẽ lại (server vẫn gác, đây chỉ là hiển thị)
+new MutationObserver(() => AUTHUI.apply($("#detail"))).observe($("#detail"), { childList: true, subtree: true });
+AUTHUI.boot();
+loadStatus().then(() => loadProducts(false));
+setInterval(loadStatus, 30000);
+</script>
+</body>
+</html>
