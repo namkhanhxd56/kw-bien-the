@@ -49,11 +49,23 @@ export const ADAPTER = {
       throw new Error(`Hết giờ chờ: ${ten}`);
     }
     const tim = (re, method, sau) => so().find(x => x.t >= sau && re.test(x.url) && (!method || x.method === method));
+    // Bấm như chuột thật: chuột thật đưa focus vào phần tử trước (ô Time Period chỉ mở khung tháng khi focus)
     function bam(el) {
       el.scrollIntoView({ block: "center" });
-      for (const t of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
-        el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+      const r = el.getBoundingClientRect();
+      const o = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+      el.dispatchEvent(new PointerEvent("pointerdown", o));
+      el.dispatchEvent(new MouseEvent("mousedown", o));
+      if (typeof el.focus === "function") {
+        el.focus();
+        // Tab chạy nền không có focus: focus() chỉ đổi activeElement, không phát sự kiện, nên phát tay
+        if (!document.hasFocus()) {
+          el.dispatchEvent(new FocusEvent("focus"));
+          el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        }
       }
+      el.dispatchEvent(new PointerEvent("pointerup", o));
+      el.dispatchEvent(new MouseEvent("mouseup", o));
       el.click();
     }
     function go(el, v) {
@@ -63,10 +75,13 @@ export const ADAPTER = {
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }
+    let gan = null;   // phần tử đang thao tác, để chụp giao diện quanh nó khi lỗi
     function debug() {
-      const hop = [...document.querySelectorAll('[role=dialog], [class*="odal"], [class*="opover"], [class*="icker"]')].filter(thay)
-        .map(e => e.outerHTML.slice(0, 2500));
-      return JSON.stringify({ url: location.href, hop: hop.slice(0, 3),
+      const hop = [...document.querySelectorAll('[role=dialog], [role=listbox], [class*="odal"], [class*="opover"], [class*="icker"], [class*="ropdown"], [class*="enu"]')]
+        .filter(thay).map(e => e.outerHTML.slice(0, 2500));
+      let quanh = null;
+      if (gan) { let e = gan; for (let i = 0; i < 4 && e.parentElement; i++) e = e.parentElement; quanh = e.outerHTML.slice(0, 4000); }
+      return JSON.stringify({ url: location.href, hop: hop.slice(0, 3), quanh, focus: document.activeElement?.outerHTML?.slice(0, 300),
                               chu: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 1500) }).slice(0, 9000);
     }
     const doiDong = (rs, ky) => {
@@ -134,18 +149,21 @@ export const ADAPTER = {
       const tTim = Date.now();
       bam(nutTim);
       log("bấm Get Keywords");
-      // Lượt kỳ hiện tại ngay sau lượt 12/2025 rỗng: mở lại lượt vừa tìm, không tốn thêm lượt
-      const dungLai = filters.period === "current" && (filters.attempt || 1) > 1;
       const s = await cho(() => {
         const moi = q('[data-testid="runnewsearch"]');
         if (moi) return { hop: moi };
         return tim(/\/rta\/cerebro\/v1\/amazon\/search\/single(\?|$)/, "POST", tTim) && { xong: true };
       }, 60000, "kết quả Get Keywords");
       if (s.hop) {
+        // Mở lại lượt tìm cũ (không tốn lượt) khi: lấy kỳ cũ (là một lượt tìm riêng, không cần dữ liệu
+        // kỳ hiện tại mới), lượt sau của cùng job, hoặc lượt cũ còn dưới 24 giờ. Ngoài ra thì tìm mới.
+        const truoc = json(tim(/previous-searches/, "GET", tTim) || {})?.data;
+        const tuoi = truoc?.createdAt ? Date.now() / 1000 - truoc.createdAt : Infinity;
+        const dungLai = filters.period !== "current" || (filters.attempt || 1) > 1 || tuoi < 86400;
         await nghi();
         const cu = dungLai && theoChu(/^Load from/i, "button, [role=button]");
         bam(cu || s.hop);
-        log(cu ? "đã tìm trước đó: mở lại lượt cũ (không tốn lượt)" : "đã tìm trước đó: bấm Run New Search");
+        log(cu ? `đã tìm trước đó (${Math.round(tuoi / 3600)} giờ trước): mở lại lượt cũ, không tốn lượt` : "đã tìm trước đó: bấm Run New Search");
       }
       const tao = await cho(() => tim(/\/rta\/cerebro\/v1\/amazon\/search\/single(\/\d+)?(\?|$)/, null, tTim), 120000, "tạo lượt tìm");
       if (tao.status >= 400) {
@@ -163,8 +181,7 @@ export const ADAPTER = {
         const TEN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][thang - 1];
         await nghi();
         const oKy = await cho(() => q('input[placeholder="Current"]'), 20000, "ô Time Period");
-        bam(oKy);
-        log("mở ô Time Period");
+        gan = oKy;
         const namCua = el => {
           for (let e = el.parentElement, i = 0; e && i < 8; e = e.parentElement, i++) {
             const m = (e.innerText || "").match(/\b(20\d\d)\b/);
@@ -174,9 +191,20 @@ export const ADAPTER = {
         };
         const oThang = () => [...document.querySelectorAll("span, div, button, td, li")]
           .filter(el => thay(el) && (el.innerText || "").trim() === TEN && el.children.length <= 1);
+        // Mở khung chọn tháng: bấm ô; chưa mở thì bấm khung bao ngoài, rồi thử phím mũi tên xuống
+        const cachMo = [() => bam(oKy), () => bam(oKy.parentElement), () => {
+          oKy.focus();
+          oKy.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+          oKy.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", code: "ArrowDown", keyCode: 40, bubbles: true }));
+        }];
+        for (const [i, mo] of cachMo.entries()) {
+          mo();
+          log(`mở ô Time Period (cách ${i + 1})`);
+          if (await cho(() => oThang().length, 3000, "").catch(() => 0)) break;
+        }
         let chon = null;
         for (let lui = 0; lui < 4 && !chon; lui++) {
-          const ds = await cho(() => { const d = oThang(); return d.length && d; }, 8000, `ô tháng ${TEN}`);
+          const ds = await cho(() => { const d = oThang(); return d.length && d; }, 5000, `ô tháng ${TEN}`);
           chon = ds.find(el => namCua(el) === nam) || (ds.length <= 2 && ds.every(el => namCua(el) == null) ? ds[0] : null);
           if (!chon) {
             const nutLui = [...document.querySelectorAll("button, [role=button], span, svg")].find(el => thay(el) &&
