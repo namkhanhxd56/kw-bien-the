@@ -33,6 +33,7 @@ class Store:
         (root / "analysis").mkdir(parents=True, exist_ok=True)
         self.agent_seen = 0.0
         self.agent_info = {}
+        self._tt_cache: dict[Path, tuple[float, dict | None]] = {}   # tóm tắt file ASIN theo mtime
 
     # ------------------------------------------------------------ tiện ích file
     def _read(self, p: Path, default):
@@ -80,6 +81,15 @@ class Store:
                 if m and m.get("ma") == ma and (best is None or m["updated_at"] > best["updated_at"]):
                     best = m
             return best
+
+    def lists_by_ma(self) -> dict[str, dict]:
+        """Bộ mới nhất của từng mã, đọc tất cả meta một lượt (danh sách mã gọi cho ~1.500 mã)."""
+        best: dict[str, dict] = {}
+        for f in (self.root / "lists").glob("*/meta.json"):
+            m = self._read(f, None)
+            if m and m.get("ma") and (m["ma"] not in best or m["updated_at"] > best[m["ma"]]["updated_at"]):
+                best[m["ma"]] = m
+        return best
 
     def save_list(self, meta: dict) -> dict:
         with khoa:
@@ -132,6 +142,22 @@ class Store:
         self.save_asin_data(slug, asin, rows=d["rows"], period_used=d["period_used"], nguon="h10",
                             canh_bao=d.get("canh_bao"), fetched_at=d["fetched_at"], dung_lai_tu=nguon_slug)
         return True
+
+    def asin_tom_tat(self, slug: str, asin: str) -> dict | None:
+        """Như asin_data nhưng không kèm dòng keyword (chỉ số kw), nhớ theo mtime để khỏi đọc lại file lớn."""
+        p = self.list_dir(slug) / f"{asin}.json"
+        try:
+            mt = p.stat().st_mtime
+        except FileNotFoundError:
+            return None
+        c = self._tt_cache.get(p)
+        if c and c[0] == mt:
+            return c[1]
+        d = self._read(p, None)
+        if d is not None:
+            d = {**{k: v for k, v in d.items() if k != "rows"}, "so_kw": len(d.get("rows") or [])}
+        self._tt_cache[p] = (mt, d)
+        return d
 
     def all_asin_data(self, slug: str, asins: list[str]) -> dict[str, dict]:
         out = {}

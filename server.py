@@ -97,14 +97,15 @@ def link_bo(slug: str) -> str:
     return f"{PUBLIC_URL}/kw-list/{quote(slug)}"
 
 
-def trang_thai_asin(slug: str, asins: list[str]) -> list[dict]:
-    jobs = store.jobs_for(slug)
+def trang_thai_asin(slug: str, asins: list[str], jobs: list[dict] | None = None) -> list[dict]:
+    """jobs: hàng đợi đã đọc sẵn (danh sách mã truyền vào để khỏi đọc jobs.json cho từng bộ)."""
+    jobs = [j for j in jobs if j["slug"] == slug] if jobs is not None else store.jobs_for(slug)
     out = []
     for a in asins:
         js = sorted((j for j in jobs if j["asin"] == a), key=lambda j: j["created_at"])
         last = js[-1] if js else None
-        d = store.asin_data(slug, a)
-        st = {"asin": a, "so_kw": len(d["rows"]) if d else 0,
+        d = store.asin_tom_tat(slug, a)
+        st = {"asin": a, "so_kw": d["so_kw"] if d else 0,
               "period_used": d["period_used"] if d else None,
               "nguon": d["nguon"] if d else None,
               "canh_bao": d.get("canh_bao", []) if d else [],
@@ -114,7 +115,7 @@ def trang_thai_asin(slug: str, asins: list[str]) -> list[dict]:
             st["trang_thai"] = "cho" if last["status"] == "queued" else "dang_lay"
             st["period_dang_thu"] = last["period"]
         elif d is not None:
-            st["trang_thai"] = "xong" if d["rows"] else "rong"
+            st["trang_thai"] = "xong" if d["so_kw"] else "rong"
         elif last and last["status"] == "failed":
             st["trang_thai"], st["loi"] = "loi", last["error"]
         else:
@@ -138,8 +139,8 @@ def du_lieu_bo(meta: dict) -> tuple[dict, list[dict], dict]:
     return data, rows, stats
 
 
-def tom_tat_bo(meta: dict, kem_dong: bool = False) -> dict:
-    asins = trang_thai_asin(meta["slug"], meta.get("asins") or [])
+def tom_tat_bo(meta: dict, kem_dong: bool = False, jobs: list[dict] | None = None) -> dict:
+    asins = trang_thai_asin(meta["slug"], meta.get("asins") or [], jobs)
     out = {**meta, "link": link_bo(meta["slug"]), "trang_thai_asin": asins,
            "so_xong": sum(1 for a in asins if a["trang_thai"] in ("xong", "rong"))}
     if kem_dong:
@@ -334,10 +335,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _products(self, refresh: bool):
         items = lark.list_products(refresh)
+        bo, jobs = store.lists_by_ma(), store._jobs()
         out = []
         for p in items:
-            meta = store.list_by_ma(p["ma"])
-            out.append({**p, "bo": tom_tat_bo(meta) if meta else None,
+            meta = bo.get(p["ma"])
+            out.append({**p, "bo": tom_tat_bo(meta, jobs=jobs) if meta else None,
                         "da_phan_tich": bool(store.get_analysis(p["ma"]).get("ket_luan")),
                         "anh_cache": lark.image_path(p["ma"], DATA, download=False) is not None})
         self._json({"ok": True, "products": out})

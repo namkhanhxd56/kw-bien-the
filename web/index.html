@@ -29,9 +29,10 @@
         <select class="input" id="f-tt" aria-label="Lọc theo trạng thái">
           <option value="">Mọi trạng thái</option>
           <option value="chua">Chưa tạo bộ</option>
-          <option value="dang">Đang lấy keyword</option>
+          <option value="dang">Chờ / đang lấy keyword</option>
           <option value="thieu">Bộ còn thiếu ASIN</option>
           <option value="du">Đủ keyword</option>
+          <option value="du3">Đủ 3 ASIN trở lên</option>
           <option value="it">Dưới 3 ASIN</option>
           <option value="anh">Đã xem ảnh</option>
           <option value="chua-anh">Chưa xem ảnh</option>
@@ -143,7 +144,8 @@ async function loadProducts(refresh) {
 function boBadge(p) {
   if (!p.bo) return '<span class="badge">Chưa tạo bộ</span>';
   const n = p.bo.asins.length, x = p.bo.so_xong;
-  if (p.bo.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) return `<span class="badge info">Đang lấy ${x}/${n}</span>`;
+  if (p.bo.trang_thai_asin.some(a => a.trang_thai === "dang_lay")) return `<span class="badge info">Đang lấy ${x}/${n}</span>`;
+  if (p.bo.trang_thai_asin.some(a => a.trang_thai === "cho")) return `<span class="badge info">Chờ lấy ${x}/${n}</span>`;
   return `<span class="badge ${x === n && n ? "ok" : ""}">Keyword ${x}/${n}</span>`;
 }
 
@@ -154,7 +156,7 @@ function trangThai(p) {
 }
 const LOC = {
   "": () => true, chua: p => !p.bo, dang: p => trangThai(p) === "dang", thieu: p => trangThai(p) === "thieu",
-  du: p => trangThai(p) === "du", it: p => p.asin_doi_thu.length < 3, anh: p => p.da_phan_tich, "chua-anh": p => !p.da_phan_tich,
+  du: p => trangThai(p) === "du", du3: p => p.asin_doi_thu.length >= 3, it: p => p.asin_doi_thu.length < 3, anh: p => p.da_phan_tich, "chua-anh": p => !p.da_phan_tich,
 };
 const XEP = {
   ma: (a, b) => a.ma.localeCompare(b.ma, "vi", { numeric: true }), "ma-": (a, b) => b.ma.localeCompare(a.ma, "vi", { numeric: true }),
@@ -165,7 +167,8 @@ function renderList() {
   const q = $("#q").value.trim().toLowerCase(), loc = LOC[$("#f-tt").value] || LOC[""], xep = XEP[$("#f-xep").value];
   let items = S.products.filter(p => loc(p) && (!q || [p.ma, p.ten_mau, p.niche, ...p.asin_doi_thu].join(" ").toLowerCase().includes(q)));
   if (xep) items = [...items].sort(xep);
-  $("#loc-dem").textContent = items.length === S.products.length ? `${S.products.length} mã` : `${items.length}/${S.products.length} mã khớp`;
+  $("#loc-dem").textContent = !S.products.length ? "Đang tải danh sách mã…"
+    : items.length === S.products.length ? `${S.products.length} mã` : `${items.length}/${S.products.length} mã khớp`;
   // vẽ lại danh sách mà giữ nguyên chỗ đang cuộn (tạo bộ, poll job đều gọi lại hàm này)
   const list = $("#list"), top = list.scrollTop;
   list.innerHTML = items.map(p => {
@@ -564,6 +567,12 @@ $("#vi-tri").addEventListener("click", e => {
 new MutationObserver(() => { AUTHUI.apply($("#detail")); capNhatViTri(); }).observe($("#detail"), { childList: true, subtree: true });
 AUTHUI.boot().finally(() => loadStatus().then(() => loadProducts(false)));
 setInterval(loadStatus, 30000);
+// Trạng thái lấy keyword của các mã khác thay đổi khi extension chạy: đọc lại danh sách mỗi phút
+// (chỉ khi đang xem tab), vẽ lại cột trái mà không đụng tới cột phải
+setInterval(async () => {
+  if (document.visibilityState !== "visible" || !S.products.length) return;
+  try { const d = await api("/api/products"); S.products = d.products; renderList(); } catch (e) { /* giữ danh sách cũ */ }
+}, 60000);
 </script>
 </body>
 </html>
