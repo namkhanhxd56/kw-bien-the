@@ -3,6 +3,7 @@ Lưu trữ bằng file JSON trong DATA_DIR (đủ cho bản tạm; khi ghép app
 
   data/lists/<slug>/meta.json     thông tin bộ keyword (mã, tên, ASIN, bộ lọc)
   data/lists/<slug>/<ASIN>.json   dòng keyword của từng ASIN + kỳ đã dùng + nguồn
+                                  (cùng ASIN ở bộ khác thì chép từ bộ đã lấy, ghi dung_lai_tu)
   data/jobs.json                  hàng đợi job lấy Cerebro cho extension
   data/analysis/<mã>.json         ghi chú phân tích ảnh sản phẩm
   data/usage.json                 số lượt Cerebro đã dùng theo ngày
@@ -100,12 +101,37 @@ class Store:
     def asin_data(self, slug: str, asin: str) -> dict | None:
         return self._read(self.list_dir(slug) / f"{asin}.json", None)
 
-    def save_asin_data(self, slug: str, asin: str, *, rows, period_used, nguon, canh_bao=None):
+    def save_asin_data(self, slug: str, asin: str, *, rows, period_used, nguon, canh_bao=None,
+                       fetched_at=None, dung_lai_tu=None):
         with khoa:
-            self._write(self.list_dir(slug) / f"{asin}.json", {
-                "asin": asin, "rows": rows, "period_used": period_used, "nguon": nguon,
-                "canh_bao": canh_bao or [], "fetched_at": time.time(),
-            })
+            d = {"asin": asin, "rows": rows, "period_used": period_used, "nguon": nguon,
+                 "canh_bao": canh_bao or [], "fetched_at": fetched_at or time.time()}
+            if dung_lai_tu:
+                d.update(dung_lai_tu=dung_lai_tu, dung_lai_luc=time.time())
+            self._write(self.list_dir(slug) / f"{asin}.json", d)
+
+    def tim_du_lieu_asin(self, asin: str, tru_slug: str = "") -> tuple[str, dict] | None:
+        """Dữ liệu Cerebro (extension lấy) mới nhất của ASIN ở bộ khác → (slug, dữ liệu).
+        Một ASIN chỉ cần chạy Cerebro một lần rồi dùng chung cho mọi bộ có nó; file tải tay không tính
+        vì không chắc đúng bộ lọc."""
+        best = None
+        for f in (self.root / "lists").glob(f"*/{asin}.json"):
+            if f.parent.name == tru_slug:
+                continue
+            d = self._read(f, None)
+            if d and d.get("nguon") == "h10" and (best is None or d["fetched_at"] > best[1]["fetched_at"]):
+                best = (d.get("dung_lai_tu") or f.parent.name, d)
+        return best
+
+    def dung_lai_asin(self, slug: str, asin: str) -> bool:
+        """Chép dữ liệu ASIN đã có ở bộ khác vào bộ này. Trả True nếu chép được."""
+        tim = self.tim_du_lieu_asin(asin, slug)
+        if not tim:
+            return False
+        nguon_slug, d = tim
+        self.save_asin_data(slug, asin, rows=d["rows"], period_used=d["period_used"], nguon="h10",
+                            canh_bao=d.get("canh_bao"), fetched_at=d["fetched_at"], dung_lai_tu=nguon_slug)
+        return True
 
     def all_asin_data(self, slug: str, asins: list[str]) -> dict[str, dict]:
         out = {}
@@ -140,6 +166,33 @@ class Store:
             self._save_jobs(jobs)
             return j
 
+    def chia_ket_qua(self, asin: str, tru_job: str, rows, period_used, nguon_slug, canh_bao, fetched_at) -> list[str]:
+        """Một job xong thì điền luôn cho các bộ khác đang chờ cùng ASIN (không chạy Cerebro lại)."""
+        with khoa:
+            jobs, xong = self._jobs(), []
+            for j in jobs:
+                if j["asin"] == asin and j["id"] != tru_job and j["status"] == "queued":
+                    self.save_asin_data(j["slug"], asin, rows=rows, period_used=period_used, nguon="h10",
+                                        canh_bao=canh_bao, fetched_at=fetched_at, dung_lai_tu=nguon_slug)
+                    j.update(status="done" if rows else "empty", rows=len(rows), finished_at=time.time(),
+                             dung_lai_tu=nguon_slug)
+                    xong.append(j["slug"])
+            if xong:
+                self._save_jobs(jobs)
+            return xong
+
+    def doi_ky_cho(self, asin: str, tru_job: str, period: str) -> None:
+        """Kỳ 12/2025 của ASIN trống: các job khác cùng ASIN đang chờ kỳ đó chuyển sang kỳ mới luôn."""
+        with khoa:
+            jobs = self._jobs()
+            for j in jobs:
+                if j["asin"] == asin and j["id"] != tru_job and j["status"] == "queued" and j["period"] != period:
+                    j.update(period=period, attempt=j["attempt"] + 1)
+            self._save_jobs(jobs)
+
+    def asin_dang_cho(self) -> set[str]:
+        return {j["asin"] for j in self._jobs() if j["status"] in ("queued", "running")}
+
     def cancel(self, slug: str, asin: str) -> None:
         with khoa:
             jobs = self._jobs()
@@ -156,7 +209,9 @@ class Store:
             for j in jobs:
                 if j["status"] == "running" and now - (j["started_at"] or now) > stale_sec:
                     j.update(status="queued", started_at=None, error="Extension không trả kết quả, xếp lại")
-            q = [j for j in jobs if j["status"] == "queued"]
+            # ASIN đang chạy ở bộ khác thì job cùng ASIN đứng chờ: xong sẽ được điền chung
+            dang_chay = {j["asin"] for j in jobs if j["status"] == "running"}
+            q = [j for j in jobs if j["status"] == "queued" and j["asin"] not in dang_chay]
             if not q:
                 self._save_jobs(jobs)
                 return None
@@ -176,7 +231,8 @@ class Store:
             return None
 
     def queue_size(self) -> int:
-        return sum(1 for j in self._jobs() if j["status"] in ("queued", "running"))
+        """Số lượt Cerebro hàng đợi sẽ tốn: mỗi ASIN một lượt, dù nhiều bộ cùng chờ."""
+        return len(self.asin_dang_cho())
 
     # ------------------------------------------------------------ lượt dùng / ngày
     def usage_today(self) -> int:

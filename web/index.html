@@ -408,7 +408,7 @@ function boHtml(bo) {
       <td><span class="badge ${cls}">${lbl}</span></td>
       <td>${ky}</td>
       <td class="num">${a.so_kw ? a.so_kw.toLocaleString("vi-VN") : "—"}</td>
-      <td>${a.nguon === "h10" ? "H10 tự động" : a.nguon === "file" ? "File tải tay" : "—"}</td>
+      <td>${a.nguon === "h10" ? (a.dung_lai_tu ? `<span title="Cùng ASIN đã lấy ở bộ ${esc(a.dung_lai_tu)}, không tốn lượt">H10 · dùng lại</span>` : "H10 tự động") : a.nguon === "file" ? "File tải tay" : "—"}</td>
       <td><div class="row nowrap">
         ${busy ? `<button class="btn sm" data-cancel="${a.asin}" data-cap="kw.edit" data-need="edit">Huỷ chờ</button>` : `<button class="btn sm" data-refetch="${a.asin}" data-cap="kw.edit" data-need="edit">${a.trang_thai === "chua_lay" ? "Lấy" : "Lấy lại"}</button>`}
         <label class="btn sm" title="Tải file Cerebro đã export thay cho extension">Tải file tay<input type="file" accept=".xlsx,.csv" data-up="${a.asin}" data-cap="kw.edit" data-need="edit" hidden></label>
@@ -469,7 +469,10 @@ async function fetchAsins(asins, layLai) {
   try {
     const r = await post(`/api/lists/${bo.slug}/fetch`, { asins, lay_lai: layLai });
     setBo(r.list);
-    toast(r.xep_hang.length ? `Đã xếp ${r.xep_hang.length} ASIN vào hàng đợi` : "Các ASIN đã có dữ liệu, không xếp thêm");
+    const ghi = [];
+    if (r.dung_lai.length) ghi.push(`dùng lại ${r.dung_lai.length} ASIN đã lấy ở bộ khác`);
+    if (r.xep_hang.length) ghi.push(`xếp ${r.xep_hang.length} ASIN vào hàng đợi (tốn ${r.luot_moi} lượt)`);
+    toast(ghi.length ? ghi.join(", ").replace(/^./, c => c.toUpperCase()) : "Các ASIN đã có dữ liệu, không xếp thêm");
     loadStatus();
   } catch (e) { toast(e.message, true); }
 }

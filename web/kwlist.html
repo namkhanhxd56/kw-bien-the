@@ -158,7 +158,7 @@ function render() {
           <td><span class="badge ${c}">${l}</span></td>
           <td>${a.period_used ? KY[a.period_used] + (a.period_used === "current" ? " (không lọc)" : "") : "—"}</td>
           <td class="num">${a.so_kw ? fmt(a.so_kw) : "—"}</td>
-          <td>${a.nguon === "h10" ? "H10 tự động" : a.nguon === "file" ? "File tải tay" : "—"}</td>
+          <td>${a.nguon === "h10" ? (a.dung_lai_tu ? `<span title="Cùng ASIN đã lấy ở bộ ${esc(a.dung_lai_tu)}, không tốn lượt">H10 · dùng lại</span>` : "H10 tự động") : a.nguon === "file" ? "File tải tay" : "—"}</td>
           <td class="small" style="white-space:normal;color:var(--warn)">${a.canh_bao.map(esc).join("; ") || '<span class="muted">—</span>'}</td></tr>`; }).join("")}</tbody>
       </table></div>
     </div></div>

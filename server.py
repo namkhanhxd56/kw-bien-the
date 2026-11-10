@@ -108,7 +108,8 @@ def trang_thai_asin(slug: str, asins: list[str]) -> list[dict]:
               "period_used": d["period_used"] if d else None,
               "nguon": d["nguon"] if d else None,
               "canh_bao": d.get("canh_bao", []) if d else [],
-              "fetched_at": d["fetched_at"] if d else None, "loi": ""}
+              "fetched_at": d["fetched_at"] if d else None, "loi": "",
+              "dung_lai_tu": d.get("dung_lai_tu") if d else None}
         if last and last["status"] in ("queued", "running"):
             st["trang_thai"] = "cho" if last["status"] == "queued" else "dang_lay"
             st["period_dang_thu"] = last["period"]
@@ -376,12 +377,20 @@ class Handler(BaseHTTPRequestHandler):
         lay_lai = bool(b.get("lay_lai"))
         st = {s["asin"]: s for s in trang_thai_asin(slug, meta["asins"])}
         can = [a for a in chon if lay_lai or st[a]["trang_thai"] in ("chua_lay", "loi")]
+        # ASIN đã lấy ở bộ khác thì chép sang, không tốn lượt (bấm "Lấy lại" mới chạy Cerebro mới)
+        dung_lai = [] if lay_lai else [a for a in can if store.dung_lai_asin(slug, a)]
+        can = [a for a in can if a not in dung_lai]
+        # ASIN đang chờ ở bộ khác: vẫn xếp nhưng không tốn thêm lượt, xong là điền chung
+        cho_chung = store.asin_dang_cho()
+        moi = [a for a in can if a not in cho_chung]
         con_lai = DAILY_LIMIT - store.usage_today() - store.queue_size()
-        if len(can) > max(con_lai, 0):
-            raise ValueError(f"Vượt giới hạn {DAILY_LIMIT} lượt Cerebro/ngày (còn {max(con_lai, 0)} lượt)")
+        if len(moi) > max(con_lai, 0):
+            raise ValueError(f"Vượt giới hạn {DAILY_LIMIT} lượt Cerebro/ngày (còn {max(con_lai, 0)} lượt)"
+                             + (f" · đã dùng lại {len(dung_lai)} ASIN từ bộ khác" if dung_lai else ""))
         for a in can:
             store.enqueue(slug, a)
-        self._json({"ok": True, "xep_hang": can, "list": tom_tat_bo(meta)})
+        self._json({"ok": True, "xep_hang": can, "dung_lai": dung_lai, "luot_moi": len(moi),
+                    "list": tom_tat_bo(meta)})
 
     def _cancel(self, slug: str):
         meta = store.get_list(slug)
@@ -556,15 +565,17 @@ class Handler(BaseHTTPRequestHandler):
         if not rows and j["period"] == KY_CHINH:
             # Kỳ 12/2025 không có kết quả → bỏ bộ lọc kỳ, lấy kỳ hiện tại
             store.update_job(job_id, status="empty", rows=0, finished_at=time.time())
+            store.doi_ky_cho(j["asin"], job_id, KY_HIEN_TAI)
             store.enqueue(j["slug"], j["asin"], period=KY_HIEN_TAI, attempt=j["attempt"] + 1)
             return self._json({"ok": True, "tiep": "thu_ky_hien_tai"})
         # Kỳ hiện tại là sản phẩm mới: cố ý không lọc SV/rank, nên không cảnh báo về bộ lọc
         canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN, RANK_MAX) if rows and period_used == KY_CHINH else []
+        luc = time.time()
         store.save_asin_data(j["slug"], j["asin"], rows=rows, period_used=period_used,
-                             nguon="h10", canh_bao=canh_bao)
-        store.update_job(job_id, status="done" if rows else "empty", rows=len(rows),
-                         finished_at=time.time())
-        self._json({"ok": True, "so_kw": len(rows)})
+                             nguon="h10", canh_bao=canh_bao, fetched_at=luc)
+        store.update_job(job_id, status="done" if rows else "empty", rows=len(rows), finished_at=luc)
+        chung = store.chia_ket_qua(j["asin"], job_id, rows, period_used, j["slug"], canh_bao, luc)
+        self._json({"ok": True, "so_kw": len(rows), "dien_chung": len(chung)})
 
 
 def main():
