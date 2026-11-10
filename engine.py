@@ -18,6 +18,7 @@ nhom final" + lớp negative của bản kwfinal (bật/tắt, dòng dính negat
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 ROOT = "ornament"
 SUF = ["", "s", "es", "'s", "er", "ers", "or", "ors", "ing", "ed", "al", "ist", "ian", "ish", "ese", "ic",
@@ -334,10 +335,17 @@ RONG = {"funny", "fun", "cute", "new", "first", "unique", "cool", "best", "beaut
         "pretty", "small", "large", "big", "mini", "vintage", "cheap"}
 
 
-def _chuan_tok(T: list[str], vocab: set[str]) -> list[str]:
+KHONG_SO_IT = (CHUNG - DOI_TUONG) | {w for w in SEASON_WORDS if " " not in w}   # không bao giờ bỏ "s" (christmas, xmas…)
+
+
+def _chuan_tok(T: list[str], vocab: Counter) -> list[str]:
+    """Đưa số nhiều về số ít (ornaments → ornament) khi dạng số ít có trong dữ liệu. Không đổi từ chung / dịp lễ, và
+    chỉ đổi khi dạng số ít đủ phổ biến (≥ 5% số lần của dạng có s): tránh kw gõ sai "christma ornament" làm mọi
+    "christmas" thành "christma"."""
     out = []
     for t in T:
-        if len(t) > 3 and t.endswith("s") and not t.endswith("ss") and t[:-1] in vocab:
+        if (len(t) > 3 and t.endswith("s") and not t.endswith("ss") and t not in KHONG_SO_IT
+                and vocab[t[:-1]] >= max(1, 0.05 * vocab[t])):
             t = t[:-1]
         out.append(t)
     return out
@@ -450,7 +458,7 @@ def chia_nhom(rows: list[dict], asins: list[str], neg: dict, *, theo_asin: dict 
     # từ cá nhân hoá giờ là một mục riêng, không còn là negative (cấu hình cũ vẫn ghi =personalized, =custom)
     neg = {c: [t for t in l if t.lstrip("=") not in PERSONAL] if isinstance(l, list) else l for c, l in neg.items()}
     tach = lambda kw: toks(kw.replace("u.s.", "us").replace("u.s", "us"))
-    vocab = set()
+    vocab = Counter()
     for r in rows:
         r["T"] = tach(r["keyword"])
         vocab.update(r["T"])
