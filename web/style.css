@@ -331,3 +331,5 @@ body:has(.chon-bar:not([hidden])) .toast { bottom: 76px; }
 .song .song-ten { margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--c); align-self: center; min-width: 64px; }
 .tabs.sub { padding: 0; margin: -4px 0 14px; }
 .tabs.sub button { padding: 8px 10px; }
+.nhom-sub { margin: 10px 0 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.nhom-sub .mo { font-weight: 400; color: var(--muted); }
