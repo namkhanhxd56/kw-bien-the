@@ -81,7 +81,7 @@ Cách chạy một job:
 | Gọi | Ý nghĩa |
 |---|---|
 | `GET /api/agent/ping` | Báo còn sống, hỏi `{cho, het_luot}`. Không nhận job, không tính lượt |
-| `GET /api/agent/next` | Lấy job kế tiếp → `{job: {id, asin, attempt, filters: {period: "2025-12" \| "current", exclude_variations, search_volume_min, organic_rank_min}}}` hoặc `{job: null}`. Mỗi job tính 1 lượt H10 (`DAILY_LIMIT`, mặc định 60/ngày) |
+| `GET /api/agent/next` | Lấy job kế tiếp → `{job: {id, asin, attempt, filters: {period: "2025-12" \| "current", exclude_variations, search_volume_min, organic_rank_min}}}` hoặc `{job: null}`. Mỗi job tính 1 lượt H10 (`DAILY_LIMIT`, mặc định 0 = không giới hạn) |
 | `POST /api/agent/jobs/<id>/result` | Body `{period_used, rows: [{keyword, search_volume, search_volume_trend, organic_rank}]}`. `rows` rỗng ở kỳ 2025-12 thì server tự xếp lại job với kỳ hiện tại |
 | `POST /api/agent/jobs/<id>/fail` | Body `{error}` |
 | `POST /api/agent/jobs/<id>/release` | H10 đăng xuất giữa chừng: trả job về hàng đợi, hoàn lượt |

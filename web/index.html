@@ -119,7 +119,7 @@ async function loadStatus() {
       : g.h10 === "logged_out" ? "H10 chưa đăng nhập"
       : !g.san_sang ? "chưa có bộ lấy Cerebro"
       : !g.nhan_job ? "đang tạm dừng" : "đang kết nối");
-    $("#st-luot").textContent = `Lượt H10 hôm nay: ${s.luot_hom_nay}/${s.gioi_han_ngay}`;
+    $("#st-luot").textContent = `Lượt H10 hôm nay: ${s.luot_hom_nay}` + (s.gioi_han_ngay > 0 ? `/${s.gioi_han_ngay}` : "");
     $("#st-hang").textContent = `Hàng đợi: ${s.hang_doi}`;
   } catch (e) { /* topbar giữ nguyên */ }
 }

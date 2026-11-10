@@ -18,7 +18,7 @@ Biến môi trường:
   AGENT_TOKEN       khoá cho extension gọi /api/agent/*; trống = chỉ nhận từ localhost
   LARK_APP_ID / LARK_APP_SECRET   có thì đọc Lark bằng Open API (khi deploy), không thì lark-cli
   BRO_AUTH_URL / BRO_AUTH_API_KEY đăng nhập + phân quyền (auth.py)
-  DAILY_LIMIT       số lượt Cerebro tối đa mỗi ngày (mặc định 60)
+  DAILY_LIMIT       số lượt Cerebro tối đa mỗi ngày (mặc định 0 = không giới hạn; H10 tự chặn thì extension dừng)
   SV_MIN / RANK_MIN / RANK_MAX  bộ lọc chuẩn (mặc định SV ≥ 50, organic rank 1–100)
   LARK_BASE, LARK_TABLE, LARK_VIEW, LARK_FLOW_TABLE   xem lark.py
 """
@@ -55,7 +55,11 @@ _RW = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
 PUBLIC_URL = (os.environ.get("PUBLIC_URL") or (f"https://{_RW}" if _RW else f"http://localhost:{PORT}")).rstrip("/")
 DATA = Path(os.environ.get("DATA_DIR", GOC / "data")).resolve()
 AGENT_TOKEN = os.environ.get("AGENT_TOKEN", "").strip()
-DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "60"))
+DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "0"))
+
+
+def het_luot_ngay() -> bool:
+    return DAILY_LIMIT > 0 and store.usage_today() >= DAILY_LIMIT
 SV_MIN = int(os.environ.get("SV_MIN", "50"))
 RANK_MIN = int(os.environ.get("RANK_MIN", "1"))
 RANK_MAX = int(os.environ.get("RANK_MAX", "100"))
@@ -386,7 +390,7 @@ class Handler(BaseHTTPRequestHandler):
         cho_chung = store.asin_dang_cho()
         moi = [a for a in can if a not in cho_chung]
         con_lai = DAILY_LIMIT - store.usage_today() - store.queue_size()
-        if len(moi) > max(con_lai, 0):
+        if DAILY_LIMIT > 0 and len(moi) > max(con_lai, 0):
             raise ValueError(f"Vượt giới hạn {DAILY_LIMIT} lượt Cerebro/ngày (còn {max(con_lai, 0)} lượt)"
                              + (f" · đã dùng lại {len(dung_lai)} ASIN từ bộ khác" if dung_lai else ""))
         for a in can:
@@ -509,7 +513,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(401, "Sai AGENT_TOKEN")
         self._agent_seen(nhan_job=self.headers.get("X-Agent-Running", "") == "1")
         self._json({"ok": True, "cho": sum(1 for j in store._jobs() if j["status"] == "queued"),
-                    "het_luot": store.usage_today() >= DAILY_LIMIT})
+                    "het_luot": het_luot_ngay()})
 
     def _agent_capture(self):
         # Request Cerebro do extension ghi lại (chế độ dò API), lưu nguyên để đọc sau
@@ -533,7 +537,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._agent_ok():
             return self._err(401, "Sai AGENT_TOKEN")
         self._agent_seen(nhan_job=True)
-        if store.usage_today() >= DAILY_LIMIT:
+        if het_luot_ngay():
             return self._json({"ok": True, "job": None, "ly_do": "het_luot_ngay"})
         j = store.next_job()
         if not j:
