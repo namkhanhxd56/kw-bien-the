@@ -316,3 +316,18 @@ td.ck input, th.ck input { width: 16px; height: 16px; cursor: pointer; vertical-
 .toast-btn { margin-left: 8px; border: 1px solid rgba(255,255,255,.6); background: transparent; color: inherit; border-radius: 5px; padding: 2px 8px; font: inherit; cursor: pointer; }
 /* Khi thanh chọn keyword đang hiện, đẩy toast lên trên để không che nhau */
 body:has(.chon-bar:not([hidden])) .toast { bottom: 76px; }
+.tabs button .so { margin-left: 6px; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.nhom-head .mo { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.vb.xem { border-style: dashed; }
+.seg { margin-right: 8px; }
+/* Cột sóng mức sát: 5 vạch tăng dần, tô theo mức (5 xanh lá → 1 đỏ) */
+.song { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; vertical-align: middle; }
+.song i { width: 4px; border-radius: 1px; background: var(--line-2); }
+.song i:nth-child(1) { height: 4px; } .song i:nth-child(2) { height: 7px; } .song i:nth-child(3) { height: 10px; }
+.song i:nth-child(4) { height: 13px; } .song i:nth-child(5) { height: 16px; }
+.song.s5 { --c: #1a9850; } .song.s4 { --c: #66bd63; } .song.s3 { --c: #d9a400; } .song.s2 { --c: #f46d43; } .song.s1 { --c: #d73027; }
+.song.s1 i:nth-child(-n+1), .song.s2 i:nth-child(-n+2), .song.s3 i:nth-child(-n+3),
+.song.s4 i:nth-child(-n+4), .song.s5 i:nth-child(-n+5) { background: var(--c); }
+.song .song-ten { margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--c); align-self: center; min-width: 64px; }
+.tabs.sub { padding: 0; margin: -4px 0 14px; }
+.tabs.sub button { padding: 8px 10px; }

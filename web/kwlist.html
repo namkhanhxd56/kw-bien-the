@@ -29,14 +29,21 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 const fmt = n => n == null ? "—" : Number(n).toLocaleString("vi-VN");
 const KY = {"2025-12": "12/2025", "current": "Kỳ hiện tại"};
 const TT = { chua_lay: ["Chưa lấy", ""], cho: ["Chờ extension", "info"], dang_lay: ["Đang lấy", "info"], xong: ["Xong", "ok"], rong: ["Không có dữ liệu", "warn"], loi: ["Lỗi", "bad"] };
-const SHEET = { "KW PRODUCT": "Product", "FUNCTION": "Function", "KW GIFTS": "Gift", "Seasonal": "Occasion" };   // thứ tự server trả: Product → Function → Gift → Occasion
+const SHEET = { "KW PRODUCT": "Product", "FUNCTION": "Function", "KW GIFTS": "Gift", "PERSONALIZED": "Personalized", "Seasonal": "Occasion" };
 const NHAN_CLS = { "Sát": "sat", "Xa": "xa", "Không hợp": "khong" };
 const TABS = [["chon", "Chọn cho sản phẩm"], ["so-sanh", "So sánh ASIN"], ["asin", "Từng ASIN"], ["tat-ca", "Tất cả keyword"]];
+// Trong "Chọn cho sản phẩm": tab theo loại (Product → Function → Gift → Personalized → Occasion), Tổng hợp ở cuối
+const LOAI = [["product", "KW PRODUCT"], ["function", "FUNCTION"], ["gift", "KW GIFTS"], ["personalized", "PERSONALIZED"], ["occasion", "Seasonal"], ["tong-hop", null]];
+const MUC = [["Nhóm 1", "biến thể có ở ≥ 3 ASIN"], ["Nhóm 2", "biến thể có ở 2 ASIN"], ["Nhóm 3", "biến thể có ở 1 ASIN"], ["Cần xem xét", "rank tốt nhất > 50"]];
 const slug = decodeURIComponent(location.pathname.replace(/^\/kw-list\//, ""));
 const PAGE = 300;
 let L = null, BT = null, view = { q: "", asin: "", orn: false, sort: "sv", dir: -1, shown: PAGE };
-let tab = (location.hash.slice(1) || "chon").replace(/^asin-.*/, "asin"), asinChon = (location.hash.match(/^#asin-(\w+)/) || [])[1] || null;
+// hash: #chon/<loại> (product … occasion, tong-hop), #so-sanh, #asin-<ASIN>, #tat-ca
+let [tab, loaiChon = "product"] = (location.hash.slice(1) || "chon").split("/");
+let asinChon = (tab.match(/^asin-(\w+)/) || [])[1] || null;
+if (asinChon) tab = "asin";
 if (!TABS.some(([k]) => k === tab)) tab = "chon";
+if (!LOAI.some(([k]) => k === loaiChon)) loaiChon = "product";
 let moHet = false;
 let KHOI = [];   // keyword của từng khối đang hiện, để nút "Sao chép" lấy ra (không chép tên biến thể)
 const CHON = new Set();   // keyword đang tích chọn (giữ qua các lần vẽ lại)
@@ -156,8 +163,8 @@ function render() {
 
     <div class="card section">
       <div class="section-head" style="flex-wrap:wrap">
-        <div class="grow"><h2>Biến thể</h2><p>Rút từ chính dữ liệu từng ASIN (kw chứa ornament / gift rank 1–50), so giữa các ASIN, rồi chọn cho sản phẩm.</p></div>
-        <button class="btn sm" id="chep-het" type="button" title="Chép keyword của mọi biến thể trong tab này, mỗi dòng 1 keyword, không có tên biến thể">Sao chép tất cả</button>
+        <div class="grow"><h2>Biến thể</h2><p>Rút từ chính dữ liệu từng ASIN (keyword rank 1–100). Nhóm 1: có ở ≥ 3 ASIN, Nhóm 2: 2 ASIN, Nhóm 3: 1 ASIN; rank tốt nhất trên 50 vào Cần xem xét.</p></div>
+        <button class="btn sm" id="chep-het" type="button" title="Chép keyword của Nhóm 1–3 trong tab này (không lấy Cần xem xét), mỗi dòng 1 keyword, không có tên biến thể">Sao chép tất cả</button>
         <button class="btn sm" id="mo-het" type="button">${moHet ? "Thu hết" : "Mở hết"}</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Các bước chia biến thể">
@@ -168,16 +175,19 @@ function render() {
   document.querySelectorAll("[data-tab]").forEach(b => b.onclick = () => { tab = b.dataset.tab; dongBoHash(); render(); });
   $("#mo-het").onclick = () => { moHet = !moHet; render(); };
   $("#chep-het").onclick = () => {
-    // Tab So sánh không có khối: chép theo thứ tự đã chọn cho sản phẩm (bỏ biến thể bị loại)
-    const kw = tab === "tat-ca" ? rowsView().map(r => r.keyword)
-      : tab === "so-sanh" ? (BT?.chon || []).flatMap(v => v.kw.map(r => r.keyword))
+    // So sánh ASIN / Tổng hợp không có khối: chép Nhóm 1–3 của mọi loại theo thứ tự đã xếp (bỏ Cần xem xét, bỏ biến thể bị loại)
+    const tatCa = tab === "tat-ca";
+    const kw = tatCa ? rowsView().map(r => r.keyword)
+      : tab === "so-sanh" || (tab === "chon" && loaiChon === "tong-hop") ? (BT?.chon || []).filter(v => v.muc !== "Cần xem xét").flatMap(v => v.kw.map(r => r.keyword))
       : KHOI.filter(k => k.chinh).flatMap(k => k.kw);
-    chep([...new Set(kw)], tab === "tat-ca" ? "keyword đang lọc" : "keyword của các biến thể");
+    chep([...new Set(kw)], tatCa ? "keyword đang lọc" : "keyword của các biến thể");
   };
   renderTab();
 }
 
-function dongBoHash() { history.replaceState(null, "", "#" + (tab === "asin" && asinChon ? "asin-" + asinChon : tab)); }
+function dongBoHash() {
+  history.replaceState(null, "", "#" + (tab === "asin" && asinChon ? "asin-" + asinChon : tab === "chon" ? "chon/" + loaiChon : tab));
+}
 
 async function chep(kw, ten) {
   if (!kw.length) return toast("Không có keyword để chép", true);
@@ -205,17 +215,26 @@ function renderTab() {
     const k = KHOI[+b.dataset.chep];
     chep(k.kw, `keyword của "${k.ten}"`);
   }));
-  el.querySelectorAll("select.nhan").forEach(s => {
-    s.addEventListener("click", e => e.stopPropagation());       // không gập/mở khối khi chọn nhãn
-    s.addEventListener("change", () => datNhan(s.dataset.ten, s.value));
-  });
+  el.querySelectorAll("[data-loai]").forEach(b => b.addEventListener("click", e => {
+    e.preventDefault(); e.stopPropagation();   // không gập/mở khối
+    datNhan(b.dataset.loai, b.dataset.nhan);
+  }));
   AUTHUI.apply(el);
 }
 
 // ---------------------------------------------------------------- khối biến thể
-function chonNhan(ten, nhan) {
-  return `<select class="nhan ${NHAN_CLS[nhan] || ""}" data-ten="${esc(ten)}" aria-label="So ${esc(ten)} với sản phẩm" data-cap="kw.edit" data-need="edit">
-    <option value="">Chưa đánh giá</option>${BT.nhan_chon.map(n => `<option ${n === nhan ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+// Cột sóng mức sát: 5 vạch, xanh lá dài nhất = sát nhất → đỏ ngắn nhất = không hợp (server tính theo số ASIN × rank tốt nhất)
+function song(v) {
+  const ten = BT.ten_sat?.[v.sat] || "";
+  const ly = `${v.so_asin}/${BT.NA} ASIN · rank tốt nhất ${v.rank ?? "—"}`;
+  return `<span class="song s${v.sat}" role="img" aria-label="Mức sát ${v.sat}/5: ${ten} (${ly})" title="Mức sát ${v.sat}/5 · ${ten}\n${ly}"><i></i><i></i><i></i><i></i><i></i><span class="song-ten">${ten}</span></span>`;
+}
+
+// Loại tay biến thể không hợp sản phẩm (vd thương hiệu); "Đưa lại" bỏ nhãn
+function nutLoai(ten, nhan) {
+  const da = nhan === "Không hợp";
+  return `<button type="button" class="btn sm ${da ? "" : "ghost"}" data-loai="${esc(ten)}" data-nhan="${da ? "" : "Không hợp"}" data-cap="kw.edit" data-need="edit"
+    title="${da ? "Đưa biến thể trở lại danh sách" : "Loại biến thể này khỏi danh sách (không hợp sản phẩm)"}">${da ? "Đưa lại" : "Loại"}</button>`;
 }
 
 const oChon = k => `<td class="ck"><input type="checkbox" data-kw="${esc(k)}" ${CHON.has(k) ? "checked" : ""} aria-label="Chọn ${esc(k)}"></td>`;
@@ -229,45 +248,100 @@ function bangKw(kw, i) {
 }
 
 // Dòng đầu khối: "tên biến thể + loại (SV: …; … keyword)", dòng dưới: "x/3 ASIN - rank tốt nhất …"
-function khoi({ ten, tag, nhan, kw, cls, chinh = true, soAsin, rank }) {
+function khoi({ ten, tag, nhan, kw, cls, chinh = true, soAsin, rank, nhom, v }) {
   const i = KHOI.push({ ten, kw: kw.map(r => r.keyword), chinh }) - 1;
   const sv = kw.reduce((n, r) => n + (r.sv || 0), 0);
-  const duoi = [soAsin != null ? `${soAsin}/${BT.NA} ASIN` : "", rank != null ? `rank tốt nhất ${rank}` : ""].filter(Boolean).join(" - ");
+  const duoi = [soAsin != null ? `${soAsin}/${BT.NA} ASIN` + (nhom ? ` (Nhóm ${nhom})` : "") : "", rank != null ? `rank tốt nhất ${rank}` : ""].filter(Boolean).join(" - ");
   return `<details class="vb ${cls || ""}" ${moHet ? "open" : ""}>
     <summary>
       <span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}<span class="sl">(SV: ${fmt(sv)}; ${kw.length} keyword)</span></span>
-      <span class="vm">${nhan !== undefined ? chonNhan(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
+      <span class="vm">${v ? song(v) : ""}${nhan !== undefined ? nutLoai(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
       ${duoi ? `<span class="vr">${duoi}</span>` : ""}
     </summary>
     ${kw.length ? bangKw(kw, i) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
   </details>`;
 }
 
-function renderChon(el) {
-  let html = `<p class="small muted" style="margin:0 0 12px">Chỉ giữ biến thể đúng với sản phẩm, theo thứ tự Product → Function → Gift → Occasion; trong mỗi mục, biến thể nhiều ASIN đối thủ dùng chung đứng trước, cùng số ASIN thì rank tốt nhất nhỏ hơn đứng trước. Keyword trong khối xếp theo Search Volume. Đặt nhãn “Không hợp” để loại.</p>`;
-  let truoc = null;
-  for (const v of BT.chon) {
-    if (v.sheet !== truoc) { html += `<div class="nhom-head">${SHEET[v.sheet]}</div>`; truoc = v.sheet; }
-    html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, soAsin: v.so_asin, rank: v.rank });
+const nhomHead = (ten, mo, vs) => `<div class="nhom-head">${esc(ten)} <span class="mo">· ${esc(mo)} · ${vs.length} biến thể · SV ${fmt(vs.reduce((n, v) => n + v.sv, 0))}</span></div>`;
+
+// Một tab loại: Nhóm 1 → 2 → 3 → Cần xem xét → bị loại → khối phụ (chưa phân loại, negative)
+function renderLoai(el, sheet) {
+  const chon = BT.chon.filter(v => v.sheet === sheet), loai = BT.loai.filter(v => v.sheet === sheet), phu = BT.phu?.[sheet] || [];
+  const ghi = { "FUNCTION": " Mục này gom keyword có decor / decoration / decorations (không có ornament), chia biến thể như Product.",
+    "KW GIFTS": " Keyword có từ chỉ người nhận (women, men, mom, dad, kids, horse lover…) chia theo đối tượng trước, còn lại theo chủ đề.",
+    "PERSONALIZED": " Mục này gom keyword có personalized / personalize / personalise / custom / customized…" }[sheet] || "";
+  let html = `<p class="small muted" style="margin:0 0 12px">Trong mỗi nhóm, biến thể nhiều ASIN đối thủ dùng chung đứng trước, cùng số ASIN thì rank tốt nhất nhỏ hơn đứng trước. Keyword trong khối xếp theo Search Volume. Cột sóng là mức sát tự tính (xanh lá = sát, đỏ = không hợp); bấm “Loại” để bỏ biến thể không hợp sản phẩm.${ghi}</p>`;
+  for (const [m, mo] of MUC) {
+    const vs = chon.filter(v => v.muc === m);
+    if (!vs.length) continue;
+    html += nhomHead(m, mo, vs);
+    for (const v of vs) html += khoi({ ten: v.ten, tag: SHEET[sheet] + (v.doi_tuong ? " · đối tượng" : ""), nhan: v.nhan, kw: v.kw, v, chinh: m !== "Cần xem xét", cls: m === "Cần xem xét" ? "xem" : "",
+      soAsin: v.so_asin, rank: v.rank, nhom: m === "Cần xem xét" ? v.nhom : null });
   }
-  if (BT.loai.length) {
-    html += `<div class="nhom-head">Loại: không sát sản phẩm</div>`;
-    for (const v of BT.loai) html += khoi({ ten: v.ten, tag: SHEET[v.sheet], nhan: v.nhan, kw: v.kw, cls: "loai", chinh: false, soAsin: v.so_asin, rank: v.rank });
+  if (loai.length) {
+    html += nhomHead("Loại: không sát sản phẩm", "nhãn Không hợp", loai);
+    for (const v of loai) html += khoi({ ten: v.ten, tag: SHEET[sheet] + (v.doi_tuong ? " · đối tượng" : ""), nhan: v.nhan, kw: v.kw, v, cls: "loai", chinh: false, soAsin: v.so_asin, rank: v.rank });
   }
-  if (!BT.chon.length && !BT.loai.length) html += `<div class="empty"><h3>Chưa rút được biến thể nào</h3><p>Không ASIN nào có keyword chứa ornament / gift trong top 1–50.</p></div>`;
+  if (phu.length) {
+    html += `<div class="nhom-head">Chưa vào biến thể</div>`;
+    for (const p of phu) html += khoi({ ten: p.ten, kw: p.kw, cls: "phu", chinh: false });
+  }
+  if (!chon.length && !loai.length && !phu.length) html += `<div class="empty"><h3>Không có keyword ${SHEET[sheet]}</h3><p>${sheet === "PERSONALIZED" ? "Không ASIN nào có keyword personalized / custom trong bộ lọc." : "Không có keyword nào thuộc loại này trong bộ lọc."}</p></div>`;
   el.innerHTML = html;
+}
+
+// Chọn cho sản phẩm: hàng tab theo loại, bên dưới là nội dung loại đang chọn (hoặc Tổng hợp)
+function renderChon(el) {
+  el.innerHTML = `<div class="tabs sub" role="tablist" aria-label="Loại keyword">
+      ${LOAI.map(([k, sh]) => `<button role="tab" type="button" data-loai-tab="${k}" aria-selected="${loaiChon === k}">${sh ? SHEET[sh] : "Tổng hợp"}${sh ? `<span class="so">${BT.chon.filter(v => v.sheet === sh).length}</span>` : ""}</button>`).join("")}
+    </div><div id="loai-body" role="tabpanel"></div>`;
+  const sh = LOAI.find(([k]) => k === loaiChon)[1];
+  sh ? renderLoai($("#loai-body"), sh) : renderTongHop($("#loai-body"));
+  el.querySelectorAll("[data-loai-tab]").forEach(b => b.onclick = () => { loaiChon = b.dataset.loaiTab; dongBoHash(); renderTab(); });
 }
 
 function renderSoSanh(el) {
   el.innerHTML = Object.entries(BT.so_sanh).map(([sheet, ds]) => `
-    <div class="nhom-head">${SHEET[sheet]}: ${ds.length} ${sheet === "KW PRODUCT" || sheet === "KW GIFTS" ? "biến thể" : "khối"} · xếp theo số ASIN dùng chung, rồi rank tốt nhất</div>
+    <div class="nhom-head">${SHEET[sheet]}: ${ds.length} ${sheet === "Seasonal" ? "khối" : "biến thể"} · xếp theo số ASIN dùng chung, rồi rank tốt nhất</div>
     ${ds.length ? `<div class="table-wrap" style="margin-bottom:8px"><table>
       <thead><tr><th>Biến thể</th><th class="num">ASIN dùng</th><th>Nhóm</th><th class="num">Rank tốt nhất</th>${BT.asins.map(a => `<th class="num">Rank ${a}<div class="small muted" style="font-weight:400">${KY[BT.ky[a]] || ""}</div></th>`).join("")}
-        <th class="num">Tổng SV</th><th class="num">Số kw</th><th>Bậc lọc</th><th>So với sản phẩm</th><th>Root (kw rank tốt nhất)</th></tr></thead>
-      <tbody>${ds.map(v => `<tr><td><b>${esc(v.ten)}</b></td><td class="num">${v.so_asin}/${BT.NA}</td><td>${v.nhom ? "Nhóm " + v.nhom : "—"}</td><td class="num">${v.rank ?? "—"}</td>
+        <th class="num">Tổng SV</th><th class="num">Số kw</th><th>Bậc lọc</th><th>Mức sát</th><th></th><th>Root (kw rank tốt nhất)</th></tr></thead>
+      <tbody>${ds.map(v => `<tr${v.nhan === "Không hợp" ? ' class="muted"' : ""}><td><b>${esc(v.ten)}</b></td><td class="num">${v.so_asin}/${BT.NA}</td><td>${v.muc}</td><td class="num">${v.rank ?? "—"}</td>
         ${BT.asins.map(a => `<td class="num">${v.per[a] == null ? '<span class="muted">—</span>' : v.per[a]}</td>`).join("")}
-        <td class="num">${fmt(v.sv)}</td><td class="num">${v.so_kw}</td><td>${v.bac}</td><td>${chonNhan(v.ten, v.nhan)}</td><td class="kw">${esc(v.root || "—")}</td></tr>`).join("")}</tbody>
+        <td class="num">${fmt(v.sv)}</td><td class="num">${v.so_kw}</td><td>${v.bac}</td><td>${song(v)}</td><td>${nutLoai(v.ten, v.nhan)}</td><td class="kw">${esc(v.root || "—")}</td></tr>`).join("")}</tbody>
     </table></div>` : '<p class="small muted">Không có biến thể.</p>'}`).join("");
+}
+
+// Tổng hợp: bảng đếm loại × nhóm, cách tính mức sát, rồi toàn bộ biến thể (mọi loại) với rank ở từng ASIN
+
+function renderTongHop(el) {
+  const tatCa = [...BT.chon, ...BT.loai];
+  const root = {};
+  for (const [sh, ds] of Object.entries(BT.so_sanh)) for (const v of ds) root[sh + "|" + v.ten] = v.root;
+  const o = (vs) => vs.length ? `${vs.length} <span class="muted">· SV ${fmt(vs.reduce((n, v) => n + v.sv, 0))}</span>` : '<span class="muted">—</span>';
+  const cot = [...MUC.map(([m]) => m), "Loại"];
+  const dem = sh => cot.map(m => m === "Loại" ? BT.loai.filter(v => v.sheet === sh) : BT.chon.filter(v => v.sheet === sh && v.muc === m));
+  const tong = cot.map(m => m === "Loại" ? BT.loai : BT.chon.filter(v => v.muc === m));
+  el.innerHTML = `
+    <div class="table-wrap" style="margin-bottom:14px"><table>
+      <thead><tr><th>Loại</th>${cot.map(m => `<th class="num">${m}</th>`).join("")}<th class="num">Chưa vào biến thể</th></tr></thead>
+      <tbody>${LOAI.filter(([, sh]) => sh).map(([k, sh]) => `<tr><td><a href="#chon/${k}" data-tab-link="${k}">${SHEET[sh]}</a></td>${dem(sh).map(vs => `<td class="num">${o(vs)}</td>`).join("")}
+        <td class="num">${fmt((BT.phu?.[sh] || []).reduce((n, p) => n + p.kw.length, 0))} kw</td></tr>`).join("")}
+        <tr><td><b>Tổng</b></td>${tong.map(vs => `<td class="num"><b>${o(vs)}</b></td>`).join("")}<td class="num"><b>${fmt(Object.values(BT.phu || {}).flat().reduce((n, p) => n + p.kw.length, 0))} kw</b></td></tr></tbody>
+    </table></div>
+    <details class="vb phu" style="margin-bottom:14px"><summary><span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">Cách tính mức sát</span></span></summary>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Số ASIN có biến thể</th><th>Rank tốt nhất ≤ 20</th><th>21–50 (page 1)</th><th>51–75</th><th>76–100</th></tr></thead>
+        <tbody>${[[3, "≥ 3 ASIN", [5, 4, 2, 1]], [2, "2 ASIN", [4, 3, 2, 1]], [1, "1 ASIN", [3, 3, 1, 1]]].map(([, l, ds]) => `<tr><td>${l}</td>${ds.map(m => `<td>${song({ sat: m, so_asin: "", rank: "" }).replace(/ title="[^"]*"/, "")}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div></details>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Loại</th><th>Nhóm</th><th>Biến thể</th><th class="num">ASIN dùng</th><th class="num">Rank tốt nhất</th>${BT.asins.map(a => `<th class="num">Rank ${a}<div class="small muted" style="font-weight:400">${KY[BT.ky[a]] || ""}</div></th>`).join("")}
+        <th class="num">Tổng SV</th><th class="num">Số kw</th><th>Mức sát</th><th></th><th>Root (kw rank tốt nhất)</th></tr></thead>
+      <tbody>${tatCa.map(v => `<tr${v.nhan === "Không hợp" ? ' class="muted"' : ""}><td>${SHEET[v.sheet]}</td><td>${v.muc}</td><td><b>${esc(v.ten)}</b>${v.doi_tuong ? ' <span class="tag">đối tượng</span>' : ""}</td><td class="num">${v.so_asin}/${BT.NA}</td><td class="num">${v.rank ?? "—"}</td>
+        ${BT.asins.map(a => `<td class="num">${v.per[a] == null ? '<span class="muted">—</span>' : v.per[a]}</td>`).join("")}
+        <td class="num">${fmt(v.sv)}</td><td class="num">${v.so_kw}</td><td>${song(v)}</td><td>${nutLoai(v.ten, v.nhan)}</td><td class="kw">${esc(root[v.sheet + "|" + v.ten] || "—")}</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  el.querySelectorAll("[data-tab-link]").forEach(a => a.onclick = e => { e.preventDefault(); loaiChon = a.dataset.tabLink; dongBoHash(); renderTab(); });
 }
 
 function renderTungAsin(el) {
@@ -275,8 +349,8 @@ function renderTungAsin(el) {
   if (!asinChon || !ds.some(t => t.asin === asinChon)) asinChon = ds[0]?.asin;
   const t = ds.find(x => x.asin === asinChon);
   el.innerHTML = `<div class="seg" role="group" aria-label="Chọn ASIN">${ds.map(x => `<button type="button" data-asin="${x.asin}" aria-pressed="${x.asin === asinChon}">${x.asin} · ${KY[x.ky] || x.ky}</button>`).join("")}</div>
-    <p class="small muted" style="margin:0 0 12px">Biến thể của riêng ASIN này: rút từ kw chứa ornament / gift rank 1–50 của chính ASIN; rank tốt nhất là rank của kw biến thể trong ASIN này; kw của ASIN gom vào biến thể theo rule, xếp theo Search Volume.</p>
-    ${Object.entries(t.bien_the).map(([sheet, vs]) => `<div class="nhom-head">${SHEET[sheet]}: ${vs.filter(v => !v.phu).length} ${sheet === "KW PRODUCT" || sheet === "KW GIFTS" ? "biến thể" : "khối"}</div>` +
+    <p class="small muted" style="margin:0 0 12px">Biến thể của riêng ASIN này: rút từ kw rank 1–100 của chính ASIN; rank tốt nhất là rank của kw biến thể trong ASIN này; kw của ASIN gom vào biến thể theo rule, xếp theo Search Volume.</p>
+    ${Object.entries(t.bien_the).map(([sheet, vs]) => `<div class="nhom-head">${SHEET[sheet]}: ${vs.filter(v => !v.phu).length} ${sheet === "FUNCTION" || sheet === "Seasonal" ? "khối" : "biến thể"}</div>` +
       (vs.length ? vs.map(v => khoi({ ten: v.ten, tag: v.phu ? "" : SHEET[sheet], kw: v.kw, cls: v.phu ? "phu" : "", chinh: !v.phu, rank: v.rank }))
         .join("") : '<p class="small muted">Không có.</p>')).join("")}`;
   el.querySelectorAll("[data-asin]").forEach(b => b.onclick = () => { asinChon = b.dataset.asin; dongBoHash(); renderTab(); });

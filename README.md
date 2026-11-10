@@ -19,10 +19,23 @@ HOST=127.0.0.1 PORT=8796 python3 -u server.py
      và không lọc SV / organic rank**. Kỳ đã dùng được ghi cho từng ASIN.
    - Khi extension chưa lấy được: bấm "Tải file tay" để nạp file Cerebro đã export (xlsx/csv).
 3. **Trang `/kw-list/<tên bộ>`.** Hiển thị keyword đã gộp: mỗi keyword giữ dòng có organic rank tốt nhất, hoà thì lấy SV cao hơn. Có lọc, sắp xếp, tải CSV. Nút "Ghi link vào Lark" ghi vào cột `Link bộ Keyword`, có hộp xác nhận trước khi ghi.
-4. **Biến thể** (thẻ "Biến thể" trên trang `/kw-list/<tên bộ>`, `engine.chia_nhom`). Theo PDF, làm 3 tầng:
-   - **Từng ASIN:** biến thể rút từ kw chứa ornament / gift rank 1–50 của chính ASIN, bỏ từ gốc và chữ chung chung; rank tốt nhất trong ASIN đó; kw của ASIN gom vào biến thể.
-   - **So sánh ASIN:** số ASIN dùng chung từng biến thể và rank ở từng ASIN.
-   - **Chọn cho sản phẩm:** xếp số ASIN dùng chung nhiều trước, cùng số ASIN thì rank tốt nhất nhỏ trước. Nhãn Sát / Xa / Không hợp sửa ngay trên trang (lưu ở `data/lists/<bộ>/danh_gia.json`); "Không hợp" bị loại.
+4. **Biến thể** (thẻ "Biến thể" trên trang `/kw-list/<tên bộ>`, `engine.chia_nhom`).
+   - **Phân loại keyword:** có personalized / personalize / personalise / custom / customized… → **Personalized**; không thì
+     có ornament → **Product**; có decor / decoration / decorations → **Function**; có gift → **Gift**; có dịp lễ →
+     **Occasion**; còn lại vào khối "Khác" của Function.
+     Từ cá nhân hoá không còn là negative (cấu hình cũ có `=personalized`, `=custom` được bỏ qua).
+   - **Rút biến thể** từ kw rank 1–100 của chính từng ASIN, bỏ từ gốc (ornament / decor… / gift / personalized…) và chữ
+     chung chung. Biến thể nhiều từ được xét trước, nên "dallas cowboys ornament" vào "dallas cowboy", không vào "cowboy".
+     Gift chia theo **đối tượng** trước (women, men, mom, kids, horse lover…, `engine.DOI_TUONG`), còn lại theo chủ đề.
+   - **Nhóm** theo số ASIN dùng biến thể: ≥ 3 ASIN → Nhóm 1, 2 ASIN → Nhóm 2, 1 ASIN → Nhóm 3. Rank tốt nhất > 50
+     (`engine.RANK_XEM_XET`) → **Cần xem xét**. Trong nhóm: nhiều ASIN trước, rồi rank tốt nhất nhỏ trước.
+   - **Tab trên cùng:** Chọn cho sản phẩm · So sánh ASIN · Từng ASIN · Tất cả keyword. Trong **Chọn cho sản phẩm** là
+     hàng tab loại Product · Function · Gift · Personalized · Occasion (mỗi tab: Nhóm 1 → 2 → 3 → Cần xem xét → bị loại
+     → chưa vào biến thể / negative), cuối cùng **Tổng hợp** (bảng đếm loại × nhóm, cách tính mức sát, toàn bộ biến
+     thể với rank ở từng ASIN). "Sao chép tất cả" chỉ lấy Nhóm 1–3.
+   - **Mức sát** (cột sóng 5 vạch, xanh lá = sát → đỏ = không hợp) tự tính theo số ASIN × rank tốt nhất
+     (`engine.MA_TRAN_SAT`; bảng giải thích ở tab Tổng hợp). Nút "Loại" gắn nhãn Không hợp để bỏ biến thể không hợp sản
+     phẩm, vd thương hiệu (lưu ở `data/lists/<bộ>/danh_gia.json`).
 
    Ô tích đầu mỗi keyword: chọn tay để sao chép hoặc **xoá khỏi bộ** (lưu ở `data/lists/<bộ>/da_xoa.json`, có Hoàn tác
    và Khôi phục ở tab Tất cả keyword); keyword đã xoá không còn trong biến thể, sao chép, CSV.

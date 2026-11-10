@@ -306,7 +306,7 @@ function renderS2() {
       <div class="field"><label for="in-niche">Niche của bộ keyword</label><input class="input" id="in-niche" value="${esc(d.niche)}"><span class="hint">Lấy theo kết luận ảnh ở bước 1 nếu khác Lark; để trống vẫn chạy được</span></div>
       <div class="field"><label for="in-product">Loại sản phẩm</label><input class="input" id="in-product" value="${esc(d.product)}"><span class="hint">vd: ornament</span></div>
       <div class="field full"><label>Tên bộ keyword</label>
-        <div class="linkbox"><span class="url" id="pv-link">${esc(t.link)}</span><span class="badge" id="pv-ten">${esc(t.ten)}</span></div>
+        <div class="linkbox"><b id="pv-ten">${esc(t.ten)}</b></div>
       </div>
     </div>
 
@@ -330,7 +330,7 @@ function renderS2() {
   $("#new-asin").addEventListener("input", () => $("#asin-err").textContent = "");
   for (const k of ["niche", "product"]) $("#in-" + k).addEventListener("input", e => {
     S.draft[k] = e.target.value; const t = tenBo();
-    $("#pv-link").textContent = t.link; $("#pv-ten").textContent = t.ten;
+    $("#pv-ten").textContent = t.ten;
     $("#btn-fetch").disabled = S.draft.asins.length < 3;   // đủ ≥ 3 ASIN là cho chạy, không đòi niche
   });
   $("#btn-fetch").addEventListener("click", createAndFetch);

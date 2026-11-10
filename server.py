@@ -169,7 +169,7 @@ def tinh_bien_the(meta: dict) -> dict:
     asins = [a for a in meta.get("asins") or [] if a in data]
     if not asins:
         return {"ok": True, "trong": True, "asins": [], "nhan_chon": NHAN}
-    res = engine.chia_nhom(rows, asins, ch["neg"], theo_asin=data, target_year=ch["target_year"],
+    res = engine.chia_nhom(rows, asins, ch["neg"], theo_asin=data, target_year=ch["target_year"], rank_root=RANK_MAX,
                            sv_min=SV_MIN, rank_min=RANK_MIN, rank_max=RANK_MAX)
     out = engine.ket_qua_json(res, dg, {"Không hợp"})
     out.update(ok=True, stats=stats, nhan_chon=NHAN, cau_hinh_rieng=ch["rieng"], target_year=ch["target_year"],
