@@ -74,8 +74,31 @@ a:hover { text-decoration: underline; }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
 
 /* ---------- layout */
-.layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: calc(100vh - 56px); }
+/* hai cột cuộn riêng: cuộn cột phải không kéo cột trái theo và ngược lại */
+.layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: calc(100vh - 56px); height: calc(100dvh - 56px); }
 .side { border-right: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+.layout > .main { overflow-y: auto; padding-top: 0; scrollbar-gutter: stable; }
+.loc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.loc-row .input { height: 30px; padding: 0 6px; font-size: 13px; }
+.loc-dem { margin-top: 6px; }
+/* thanh cuộn luôn hiện (macOS mặc định giấu đi khi không cuộn) */
+.side-list, .layout > .main { scrollbar-width: auto; scrollbar-color: #b8bfca transparent; }
+.side-list::-webkit-scrollbar, .layout > .main::-webkit-scrollbar { width: 12px; }
+.side-list::-webkit-scrollbar-thumb, .layout > .main::-webkit-scrollbar-thumb { background: #c3c9d3; border-radius: 6px; border: 3px solid transparent; background-clip: content-box; }
+.side-list::-webkit-scrollbar-thumb:hover, .layout > .main::-webkit-scrollbar-thumb:hover { background-color: #98a1ae; }
+.side-list::-webkit-scrollbar-track, .layout > .main::-webkit-scrollbar-track { background: var(--surface-2); }
+/* thanh vị trí dính đầu cột phải */
+.vi-tri { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  max-width: 1080px; margin: 0 auto 16px; padding: 10px 0 12px; background: var(--bg); }
+.vi-tri .vt-ma { font-weight: 600; white-space: nowrap; }
+.vi-tri .vt-buoc { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.vi-tri .vt-buoc button { height: 28px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface);
+  font-size: 13px; color: var(--ink-2); cursor: pointer; white-space: nowrap; }
+.vi-tri .vt-buoc button:hover { color: var(--ink); border-color: var(--muted); }
+.vi-tri .vt-buoc button.on { background: var(--accent-soft); border-color: #c9dbfa; color: var(--accent); font-weight: 600; }
+.vi-tri .vt-buoc button:disabled { opacity: .4; cursor: default; }
+.vi-tri .vt-thanh { position: absolute; left: 0; right: 0; bottom: 4px; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.vi-tri .vt-thanh i { display: block; height: 100%; width: 0; background: var(--accent); }
 .side-head { padding: 14px 14px 10px; border-bottom: 1px solid var(--line); }
 .side-head .label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .side-list { overflow-y: auto; flex: 1; padding: 6px; }
@@ -235,6 +258,9 @@ dialog.zoom img { display: block; max-width: 100%; max-height: 85vh; }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   .side { border-right: 0; border-bottom: 1px solid var(--line); max-height: 300px; }
+  .layout { height: auto; grid-template-rows: auto; }
+  .layout > .main { overflow: visible; }
+  .vi-tri { top: 56px; }
   .grid-2 { grid-template-columns: 1fr; }
   .photo { max-width: 320px; }
   .main { padding: 16px; }

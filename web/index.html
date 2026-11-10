@@ -24,12 +24,44 @@
         <b>Mã trên Lark</b>
         <button class="btn sm" id="btn-reload" title="Đọc lại bảng PPC - Phân tích Keyword">Tải lại từ Lark</button>
       </div>
-      <input class="input" id="q" type="search" placeholder="Tìm mã, tên mẫu, niche" aria-label="Tìm mã">
+      <input class="input" id="q" type="search" placeholder="Tìm mã, tên mẫu, niche, ASIN" aria-label="Tìm mã">
+      <div class="loc-row">
+        <select class="input" id="f-tt" aria-label="Lọc theo trạng thái">
+          <option value="">Mọi trạng thái</option>
+          <option value="chua">Chưa tạo bộ</option>
+          <option value="dang">Đang lấy keyword</option>
+          <option value="thieu">Bộ còn thiếu ASIN</option>
+          <option value="du">Đủ keyword</option>
+          <option value="it">Dưới 3 ASIN</option>
+          <option value="anh">Đã xem ảnh</option>
+          <option value="chua-anh">Chưa xem ảnh</option>
+        </select>
+        <select class="input" id="f-xep" aria-label="Sắp xếp">
+          <option value="">Thứ tự Lark</option>
+          <option value="ma">Mã A→Z</option>
+          <option value="ma-">Mã Z→A</option>
+          <option value="asin">Nhiều ASIN trước</option>
+        </select>
+      </div>
+      <div class="loc-dem small muted" id="loc-dem"></div>
     </div>
     <div class="side-list" id="list" role="listbox" aria-label="Danh sách mã"></div>
   </aside>
 
-  <main class="main"><div class="main-inner" id="detail"></div></main>
+  <main class="main" id="main">
+    <nav class="vi-tri" id="vi-tri" aria-label="Vị trí trong trang" hidden>
+      <div class="vt-ma" id="vt-ma"></div>
+      <div class="vt-buoc">
+        <button type="button" data-den="h-s1">1 · Ảnh sản phẩm</button>
+        <button type="button" data-den="h-s2">2 · Lấy keyword</button>
+        <button type="button" data-den="bo-box">Bộ keyword</button>
+        <button type="button" data-den="h-s3">3 · Biến thể</button>
+      </div>
+      <span class="vt-pt small muted" id="vt-pt"></span>
+      <div class="vt-thanh"><i id="vt-thanh"></i></div>
+    </nav>
+    <div class="main-inner" id="detail"></div>
+  </main>
 </div>
 
 <dialog id="dlg-confirm">
@@ -99,7 +131,8 @@ async function loadProducts(refresh) {
     S.products = d.products;
     renderList();
     const want = S.sel || decodeURIComponent(location.hash.slice(1)) || (S.products[0] || {}).ma;
-    if (want && S.products.some(p => p.ma === want)) select(want, true);
+    // lần đầu mở trang thì kéo mã đang chọn vào tầm nhìn; tải lại từ Lark thì để cột trái đứng yên
+    if (want && S.products.some(p => p.ma === want)) select(want, refresh ? "giu" : "dau");
     else if (!S.products.length) $("#detail").innerHTML = `<div class="card empty"><h3>Bảng chưa có mã nào</h3><p>Thêm mã vào bảng "PPC - Phân tích Keyword" trên Lark rồi bấm Tải lại từ Lark.</p></div>`;
     if (refresh) toast("Đã đọc lại bảng Lark");
   } catch (e) {
@@ -114,10 +147,28 @@ function boBadge(p) {
   return `<span class="badge ${x === n && n ? "ok" : ""}">Keyword ${x}/${n}</span>`;
 }
 
+function trangThai(p) {
+  if (!p.bo) return "chua";
+  if (p.bo.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) return "dang";
+  return p.bo.so_xong === p.bo.asins.length && p.bo.asins.length ? "du" : "thieu";
+}
+const LOC = {
+  "": () => true, chua: p => !p.bo, dang: p => trangThai(p) === "dang", thieu: p => trangThai(p) === "thieu",
+  du: p => trangThai(p) === "du", it: p => p.asin_doi_thu.length < 3, anh: p => p.da_phan_tich, "chua-anh": p => !p.da_phan_tich,
+};
+const XEP = {
+  ma: (a, b) => a.ma.localeCompare(b.ma, "vi", { numeric: true }), "ma-": (a, b) => b.ma.localeCompare(a.ma, "vi", { numeric: true }),
+  asin: (a, b) => b.asin_doi_thu.length - a.asin_doi_thu.length,
+};
+
 function renderList() {
-  const q = $("#q").value.trim().toLowerCase();
-  const items = S.products.filter(p => !q || [p.ma, p.ten_mau, p.niche].join(" ").toLowerCase().includes(q));
-  $("#list").innerHTML = items.map(p => {
+  const q = $("#q").value.trim().toLowerCase(), loc = LOC[$("#f-tt").value] || LOC[""], xep = XEP[$("#f-xep").value];
+  let items = S.products.filter(p => loc(p) && (!q || [p.ma, p.ten_mau, p.niche, ...p.asin_doi_thu].join(" ").toLowerCase().includes(q)));
+  if (xep) items = [...items].sort(xep);
+  $("#loc-dem").textContent = items.length === S.products.length ? `${S.products.length} mã` : `${items.length}/${S.products.length} mã khớp`;
+  // vẽ lại danh sách mà giữ nguyên chỗ đang cuộn (tạo bộ, poll job đều gọi lại hàm này)
+  const list = $("#list"), top = list.scrollTop;
+  list.innerHTML = items.map(p => {
     const n = p.asin_doi_thu.length;
     const thumb = p.anh_cache ? `<img class="thumb" src="/api/products/${encodeURIComponent(p.ma)}/image?cached=1" alt="">` : `<div class="thumb">${esc(p.ma.slice(0, 3))}</div>`;
     return `<button class="item ${p.ma === S.sel ? "active" : ""}" data-ma="${esc(p.ma)}" role="option" aria-selected="${p.ma === S.sel}">
@@ -127,11 +178,16 @@ function renderList() {
         <div class="t2">${esc(p.ten_mau || "—")}</div>
         <div class="t3"><span class="badge ${n < 3 ? "bad" : ""}">${n} ASIN</span>${boBadge(p)}${p.da_phan_tich ? '<span class="badge ok">Đã xem ảnh</span>' : ""}</div>
       </div></button>`;
-  }).join("") || '<div class="empty small">Không có mã khớp</div>';
+  }).join("") || `<div class="empty small">Không có mã khớp${q || $("#f-tt").value ? '<br><button class="btn sm" id="bo-loc" style="margin-top:8px">Bỏ tìm kiếm và lọc</button>' : ""}</div>`;
+  list.scrollTop = top;
 }
 
-$("#list").addEventListener("click", e => { const b = e.target.closest(".item"); if (b) select(b.dataset.ma); });
+$("#list").addEventListener("click", e => {
+  if (e.target.id === "bo-loc") { $("#q").value = ""; $("#f-tt").value = ""; return renderList(); }
+  const b = e.target.closest(".item"); if (b) select(b.dataset.ma);
+});
 $("#q").addEventListener("input", renderList);
+for (const id of ["#f-tt", "#f-xep"]) $(id).addEventListener("change", renderList);
 $("#btn-reload").addEventListener("click", () => loadProducts(true));
 
 // ---------------------------------------------------------------- chi tiết mã
@@ -149,7 +205,10 @@ async function select(ma, keepScroll) {
     product: bo ? bo.product : (/ornament/i.test(p.ten_mau) || !p.ten_mau ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
   };
   renderDetail();
-  if (!keepScroll) window.scrollTo(0, 0);
+  // chọn mã khác: chỉ cột phải về đầu, cột trái đứng yên; mở từ link (#mã) thì kéo mã đó vào tầm nhìn
+  if (!keepScroll) cuonPhai().scrollTo(0, 0);
+  else if (keepScroll === "dau") { const it = $("#list .item.active"); if (it) it.scrollIntoView({ block: "nearest" }); }
+  capNhatViTri();
   loadAnalysis(ma);
   if (bo) refreshList(bo.slug);
 }
@@ -458,8 +517,48 @@ function schedulePoll() {
   }
 }
 
+// ---------------------------------------------------------------- thanh vị trí cột phải
+// màn hẹp (≤ 900px) cả trang cuộn chung, màn rộng thì cột phải tự cuộn
+const cuonPhai = () => getComputedStyle($("#main")).overflowY === "auto" ? $("#main") : document.scrollingElement;
+// mỗi nút trỏ tới cả khối (section) chứa tiêu đề; "Bộ keyword" trỏ thẳng tới bảng, chưa có bộ thì không có đích
+function dichCua(b) {
+  const el = document.getElementById(b.dataset.den);
+  if (!el || !el.offsetParent || (b.dataset.den === "bo-box" && !el.childElementCount)) return null;
+  return b.dataset.den !== "bo-box" && el.closest("section") || el;
+}
+function capNhatViTri() {
+  const m = cuonPhai(), p = product(), nav = $("#vi-tri");
+  nav.hidden = !p; if (!p) return;
+  $("#vt-ma").textContent = p.ma;
+  const max = m.scrollHeight - m.clientHeight, pt = max > 0 ? Math.round(m.scrollTop / max * 100) : 0;
+  $("#vt-thanh").style.width = pt + "%";
+  $("#vt-pt").textContent = max > 0 ? pt + "%" : "";
+  // mục đang xem = mục cuối cùng có đầu đã cuộn qua mép trên (cộng chiều cao thanh vị trí)
+  const day = nav.getBoundingClientRect().bottom + 8;
+  let dang = null;
+  for (const b of nav.querySelectorAll("[data-den]")) {
+    const el = dichCua(b);
+    b.disabled = !el;
+    if (el && el.getBoundingClientRect().top <= day + 4) dang = b;
+  }
+  if (!dang || m.scrollTop < 4) dang = nav.querySelector("[data-den]");
+  // cuộn hết trang thì các mục cuối không lên được tới đầu: giữ mục vừa bấm, không thì lấy mục cuối
+  if (max > 0 && m.scrollTop >= max - 2) dang = (nav._bam && !nav._bam.disabled ? nav._bam : [...nav.querySelectorAll("[data-den]:not(:disabled)")].pop()) || dang;
+  else if (!nav._dangCuon) nav._bam = null;
+  nav.querySelectorAll("[data-den]").forEach(b => b.classList.toggle("on", b === dang));
+}
+for (const el of [$("#main"), window]) el.addEventListener("scroll", () => requestAnimationFrame(capNhatViTri), { passive: true });
+window.addEventListener("resize", capNhatViTri);
+$("#vi-tri").addEventListener("click", e => {
+  const b = e.target.closest("[data-den]"); if (!b) return;
+  const dich = dichCua(b); if (!dich) return;
+  const m = cuonPhai(), nav = $("#vi-tri");
+  nav._bam = b; nav._dangCuon = true; clearTimeout(nav._h); nav._h = setTimeout(() => { nav._dangCuon = false; }, 1000);
+  m.scrollTo({ top: m.scrollTop + dich.getBoundingClientRect().top - $("#vi-tri").getBoundingClientRect().bottom - 8, behavior: "smooth" });
+});
+
 // Nút thiếu quyền mờ đi mỗi khi phần chi tiết vẽ lại (server vẫn gác, đây chỉ là hiển thị)
-new MutationObserver(() => AUTHUI.apply($("#detail"))).observe($("#detail"), { childList: true, subtree: true });
+new MutationObserver(() => { AUTHUI.apply($("#detail")); capNhatViTri(); }).observe($("#detail"), { childList: true, subtree: true });
 AUTHUI.boot().finally(() => loadStatus().then(() => loadProducts(false)));
 setInterval(loadStatus, 30000);
 </script>
