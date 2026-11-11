@@ -289,6 +289,8 @@ class Handler(BaseHTTPRequestHandler):
                 if m:
                     return self._agent_capture_file(m.group(1))
             else:
+                if path == "/api/tool/dung":
+                    return self._dung_tool()
                 if path == "/api/lists":
                     return self._create_list()
                 m = re.fullmatch(r"/api/analysis/([^/]+)", path)
@@ -334,7 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None,   # bản đang chạy trên Railway
             "agent": {"online": time.time() - seen < 90, "last_seen": seen or None, **store.agent_info},
             "luot_hom_nay": store.usage_today(), "gioi_han_ngay": DAILY_LIMIT,
-            "hang_doi": store.queue_size(), "luu_tru": luu_tru(), "capture": tom_tat_capture(),
+            "hang_doi": store.queue_size(), "tam_dung": store.tam_dung(),
+            "luu_tru": luu_tru(), "capture": tom_tat_capture(),
         })
 
     def _products(self, refresh: bool):
@@ -496,6 +499,11 @@ class Handler(BaseHTTPRequestHandler):
         lark.write_link(meta["record_id"], url)
         self._json({"ok": True, "link": url})
 
+    def _dung_tool(self):
+        dung = bool(self._jbody().get("dung"))
+        store.dat_tam_dung(dung)
+        self._json({"ok": True, "tam_dung": dung})
+
     # ------------------------------------------------------------ extension
     def _agent_seen(self, nhan_job: bool):
         store.agent_seen = time.time()
@@ -512,8 +520,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self._agent_ok():
             return self._err(401, "Sai AGENT_TOKEN")
         self._agent_seen(nhan_job=self.headers.get("X-Agent-Running", "") == "1")
-        self._json({"ok": True, "cho": sum(1 for j in store._jobs() if j["status"] == "queued"),
-                    "het_luot": het_luot_ngay()})
+        # Đang dừng tool thì báo hàng trống: extension đóng tab H10 và đứng chờ
+        dung = store.tam_dung()
+        self._json({"ok": True, "cho": 0 if dung else sum(1 for j in store._jobs() if j["status"] == "queued"),
+                    "het_luot": het_luot_ngay(), "tam_dung": dung})
 
     def _agent_capture(self):
         # Request Cerebro do extension ghi lại (chế độ dò API), lưu nguyên để đọc sau
@@ -539,6 +549,8 @@ class Handler(BaseHTTPRequestHandler):
         self._agent_seen(nhan_job=True)
         if het_luot_ngay():
             return self._json({"ok": True, "job": None, "ly_do": "het_luot_ngay"})
+        if store.tam_dung():
+            return self._json({"ok": True, "job": None, "ly_do": "tam_dung"})
         j = store.next_job()
         if not j:
             return self._json({"ok": True, "job": None})

@@ -72,6 +72,7 @@ ROUTES = [
     ("GET", r"/api/lists/[^/]+/bien-the", "kw.view", "view"),
     ("POST", r"/api/analysis/[^/]+", "kw.edit", "edit"),
     ("POST", r"/api/lists", "kw.edit", "edit"),
+    ("POST", r"/api/tool/dung", "kw.edit", "edit"),
     ("POST", r"/api/lists/[^/]+/(fetch|cancel|upload)", "kw.edit", "edit"),
     ("POST", r"/api/lists/[^/]+/lark-link", "kw.lark", "edit"),
     ("POST", r"/api/lists/[^/]+/bien-the/nhan", "kw.edit", "edit"),

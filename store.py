@@ -260,6 +260,14 @@ class Store:
         """Số lượt Cerebro hàng đợi sẽ tốn: mỗi ASIN một lượt, dù nhiều bộ cùng chờ."""
         return len(self.asin_dang_cho())
 
+    # ------------------------------------------------------------ dừng / chạy tool
+    def tam_dung(self) -> bool:
+        """Người dùng bấm Dừng tool: extension không nhận job mới (hàng đợi giữ nguyên)."""
+        return bool(self._read(self.root / "tam_dung.json", {}).get("dung"))
+
+    def dat_tam_dung(self, dung: bool) -> None:
+        self._write(self.root / "tam_dung.json", {"dung": dung, "luc": time.time()})
+
     # ------------------------------------------------------------ lượt dùng / ngày
     def usage_today(self) -> int:
         return self._read(self.root / "usage.json", {}).get(datetime.now().strftime("%Y-%m-%d"), 0)

@@ -15,6 +15,7 @@
   <div class="stat" id="st-agent" title="Extension lấy Cerebro trên Chrome"><span class="dot"></span><span>Extension: …</span></div>
   <div class="stat hide-sm" id="st-luot">Lượt H10 hôm nay: …</div>
   <div class="stat hide-sm" id="st-hang">Hàng đợi: …</div>
+  <button class="btn sm" id="b-dung" data-cap="kw.edit" data-need="edit" hidden>Dừng tool</button>
 </header>
 
 <div class="layout">
@@ -121,8 +122,26 @@ async function loadStatus() {
       : !g.nhan_job ? "đang tạm dừng" : "đang kết nối");
     $("#st-luot").textContent = `Lượt H10 hôm nay: ${s.luot_hom_nay}` + (s.gioi_han_ngay > 0 ? `/${s.gioi_han_ngay}` : "");
     $("#st-hang").textContent = `Hàng đợi: ${s.hang_doi}`;
+    const b = $("#b-dung");
+    b.hidden = false;
+    b.textContent = s.tam_dung ? "Chạy tiếp tool" : "Dừng tool";
+    b.classList.toggle("primary", !!s.tam_dung);
+    b.title = s.tam_dung ? "Tool đang dừng: extension không nhận job mới. Bấm để chạy tiếp hàng đợi"
+      : "Dừng nhận job mới. Hàng đợi giữ nguyên, ASIN đang lấy dở vẫn chạy cho xong";
+    if (s.tam_dung) $("#st-agent span:last-child").textContent = "Extension: tool đang dừng";
   } catch (e) { /* topbar giữ nguyên */ }
 }
+
+$("#b-dung").onclick = async e => {
+  const dung = !S.status?.tam_dung, b = e.currentTarget;
+  b.disabled = true;
+  try {
+    await post("/api/tool/dung", { dung });
+    toast(dung ? "Đã dừng tool: không nhận job mới, hàng đợi giữ nguyên" : "Tool chạy tiếp hàng đợi");
+    await loadStatus();
+  } catch (err) { toast("Không đổi được trạng thái tool: " + err.message, true); }
+  finally { b.disabled = false; }
+};
 
 // ---------------------------------------------------------------- danh sách mã
 async function loadProducts(refresh) {
