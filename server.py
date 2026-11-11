@@ -35,6 +35,7 @@ import re
 import sys
 import time
 import traceback
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -183,6 +184,20 @@ def tinh_bien_the(meta: dict) -> dict:
     return out
 
 
+def danh_sach_may() -> list[dict]:
+    """Các máy extension đã báo về (từ lúc server chạy), máy báo gần nhất trước; kèm ASIN đang lấy."""
+    now, dang = time.time(), {}
+    for j in store._jobs():
+        if j["status"] == "running":
+            dang[j.get("may") or "may-cu"] = j["asin"]
+    out = []
+    for m in sorted(store.agents.values(), key=lambda x: -x["last_seen"]):
+        if now - m["last_seen"] > 24 * 3600:
+            continue
+        out.append({**m, "online": now - m["last_seen"] < 90, "dang_lay": dang.get(m["id"])})
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "KWBienThe/0.1"
 
@@ -254,6 +269,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._file(WEB / "index.html")
                 if path.startswith("/kw-list/"):
                     return self._file(WEB / "kwlist.html")
+                if path == "/hang-doi":
+                    return self._file(WEB / "hang-doi.html")
+                if path == "/extension.zip":
+                    return self._extension_zip()
+                if path == "/api/hang-doi":
+                    return self._hang_doi()
                 if path.startswith("/static/"):
                     p = (WEB / path[len("/static/"):]).resolve()
                     if WEB not in p.parents:
@@ -291,6 +312,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 if path == "/api/tool/dung":
                     return self._dung_tool()
+                if path == "/api/hang-doi/bo":
+                    return self._bo_hang_doi()
                 if path == "/api/lists":
                     return self._create_list()
                 m = re.fullmatch(r"/api/analysis/([^/]+)", path)
@@ -330,11 +353,14 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ trang thông tin
     def _status(self):
-        seen = store.agent_seen
+        may = danh_sach_may()
+        con = [m for m in may if m["online"]]
+        # "agent" giữ dạng cũ (một máy) cho giao diện cũ: lấy máy online báo gần nhất
+        dai_dien = (con or may or [{"online": False, "last_seen": None}])[0]
         self._json({
             "ok": True, "bo_loc": BO_LOC, "public_url": PUBLIC_URL,
             "commit": os.environ.get("RAILWAY_GIT_COMMIT_SHA", "")[:7] or None,   # bản đang chạy trên Railway
-            "agent": {"online": time.time() - seen < 90, "last_seen": seen or None, **store.agent_info},
+            "agent": {**dai_dien, "so_may": len(con)}, "may": may,
             "luot_hom_nay": store.usage_today(), "gioi_han_ngay": DAILY_LIMIT,
             "hang_doi": store.queue_size(), "tam_dung": store.tam_dung(),
             "luu_tru": luu_tru(), "capture": tom_tat_capture(),
@@ -499,15 +525,68 @@ class Handler(BaseHTTPRequestHandler):
         lark.write_link(meta["record_id"], url)
         self._json({"ok": True, "link": url})
 
+    def _hang_doi(self):
+        """Hàng đợi theo bộ: ASIN nào đang chờ / đang lấy, máy nào lấy, bỏ bộ thì bớt bao nhiêu lượt."""
+        jobs = store._jobs()
+        cho = [j for j in jobs if j["status"] in ("queued", "running")]
+        theo_asin: dict[str, set] = {}
+        for j in cho:
+            theo_asin.setdefault(j["asin"], set()).add(j["slug"])
+        dang = {j["asin"] for j in cho if j["status"] == "running"}
+        meta = {m["slug"]: m for m in store.lists_by_ma().values()}
+        bo: dict[str, dict] = {}
+        for j in sorted(cho, key=lambda x: x["created_at"]):
+            b = bo.get(j["slug"])
+            if not b:
+                m = meta.get(j["slug"]) or store.get_list(j["slug"]) or {}
+                b = bo[j["slug"]] = {"slug": j["slug"], "ma": m.get("ma", ""), "ten": m.get("ten", j["slug"]),
+                                     "niche": m.get("niche", ""), "xep_luc": j["created_at"],
+                                     "asins": [], "luot_rieng": 0}
+            b["asins"].append({"asin": j["asin"], "dang_lay": j["status"] == "running",
+                               "ten_may": j.get("ten_may") or "", "ky": j["period"],
+                               "bo_khac": len(theo_asin[j["asin"]]) - 1})
+            # Lượt chỉ bộ này cần: bỏ bộ là bớt lượt đó (ASIN dùng chung thì bộ khác vẫn chờ)
+            if j["status"] == "queued" and len(theo_asin[j["asin"]]) == 1 and j["asin"] not in dang:
+                b["luot_rieng"] += 1
+        # Thời gian một lượt: trung vị các job xong trong 6 giờ qua
+        gan = sorted(j["finished_at"] - j["started_at"] for j in jobs
+                     if j.get("started_at") and j.get("finished_at") and j["status"] in ("done", "empty", "failed")
+                     and not j.get("dung_lai_tu") and j["finished_at"] > time.time() - 6 * 3600)
+        self._json({"ok": True, "bo": list(bo.values()), "so_luot": len(theo_asin),
+                    "phut_moi_luot": round(gan[len(gan) // 2] / 60, 1) if gan else None,
+                    "may": danh_sach_may(), "tam_dung": store.tam_dung()})
+
+    def _bo_hang_doi(self):
+        slugs = [str(x) for x in (self._jbody().get("slugs") or [])][:5000]
+        if not slugs:
+            raise ValueError("Chưa chọn bộ nào")
+        self._json({"ok": True, "da_bo": store.bo_khoi_hang(slugs)})
+
+    def _extension_zip(self):
+        """Gói extension để cài lên máy khác (Load unpacked)."""
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted((GOC / "extension").iterdir()):
+                if f.is_file() and not f.name.startswith("."):
+                    z.write(f, "kw-bien-the-extension/" + f.name)
+        self._send(200, buf.getvalue(), "application/zip",
+                   {"Content-Disposition": 'attachment; filename="kw-bien-the-extension.zip"'})
+
     def _dung_tool(self):
         dung = bool(self._jbody().get("dung"))
         store.dat_tam_dung(dung)
         self._json({"ok": True, "tam_dung": dung})
 
     # ------------------------------------------------------------ extension
+    def _may(self) -> tuple[str, str]:
+        """(id, tên) máy đang gọi. Extension cũ (≤ 0.1.7) không gửi id: gom chung một máy."""
+        mid = re.sub(r"[^A-Za-z0-9-]", "", self.headers.get("X-Agent-Id", ""))[:40] or "may-cu"
+        return mid, unquote(self.headers.get("X-Agent-Ten", "")).strip()[:60]
+
     def _agent_seen(self, nhan_job: bool):
-        store.agent_seen = time.time()
-        store.agent_info = {
+        mid, ten = self._may()
+        store.agents[mid] = {
+            "id": mid, "ten": ten, "last_seen": time.time(),
             "phien_ban": self.headers.get("X-Agent-Version", ""),
             "h10": self.headers.get("X-Agent-H10", "unknown"),
             "san_sang": self.headers.get("X-Agent-Ready", "") == "1",
@@ -551,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "job": None, "ly_do": "het_luot_ngay"})
         if store.tam_dung():
             return self._json({"ok": True, "job": None, "ly_do": "tam_dung"})
-        j = store.next_job()
+        j = store.next_job(may=self._may()[0], ten_may=self._may()[1])
         if not j:
             return self._json({"ok": True, "job": None})
         store.add_usage()

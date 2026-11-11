@@ -4,7 +4,7 @@
 import { ADAPTER, laTrangDangNhap } from "./adapter.js";
 
 const VERSION = chrome.runtime.getManifest().version;
-const MAC_DINH = { server: "http://localhost:8796", token: "", running: true, capture: false, nghi: 10 };
+const MAC_DINH = { server: "http://localhost:8796", token: "", running: true, capture: false, nghi: 10, ten: "" };
 const HET_GIO_JOB = 8 * 60 * 1000;   // server tự trả job về hàng đợi sau 10 phút
 const HET_GIO_TAB = 60 * 1000;
 
@@ -14,6 +14,15 @@ let henCapture = null;
 
 // ---------------------------------------------------------------- cấu hình & trạng thái
 const cfg = () => chrome.storage.local.get(MAC_DINH);
+// Mỗi máy một id cố định để tool phân biệt khi nhiều máy cùng chạy hàng đợi
+async function mayId() {
+  let { agentId } = await chrome.storage.local.get("agentId");
+  if (!agentId) {
+    agentId = "may-" + crypto.randomUUID().slice(0, 8);
+    await chrome.storage.local.set({ agentId });
+  }
+  return agentId;
+}
 async function st() {
   return (await chrome.storage.session.get({ st: { phase: "idle", h10: "unknown", job: null, last: null, error: null, captured: 0, tabId: null } })).st;
 }
@@ -28,7 +37,7 @@ function datSt(p) {
 }
 
 async function api(path, { method = "GET", body } = {}) {
-  const c = await cfg(), s = await st();
+  const c = await cfg(), s = await st(), id = await mayId();
   let r;
   try {
     r = await fetch(c.server.replace(/\/$/, "") + path, {
@@ -36,6 +45,8 @@ async function api(path, { method = "GET", body } = {}) {
       headers: {
         "Content-Type": "application/json",
         "X-Agent-Token": c.token,
+        "X-Agent-Id": id,
+        "X-Agent-Ten": encodeURIComponent(c.ten || ""),
         "X-Agent-Version": VERSION,
         "X-Agent-H10": s.h10,
         "X-Agent-Ready": ADAPTER.ready ? "1" : "0",

@@ -71,6 +71,7 @@
   <form id="f">
     <label class="f"><span>Địa chỉ tool</span><input type="text" id="i-server" class="mono" spellcheck="false" required></label>
     <label class="f"><span>Agent token (để trống nếu tool chạy ở máy này)</span><input type="password" id="i-token" class="mono" autocomplete="off"></label>
+    <label class="f"><span>Tên máy (hiện ở trang Hàng đợi của tool)</span><input type="text" id="i-ten" maxlength="60" placeholder="VD: Máy Thuỳ, Máy văn phòng 2"></label>
     <label class="f"><span>Nghỉ giữa các job (giây)</span><input type="number" id="i-nghi" min="5" max="300" step="1"></label>
     <div class="row"><button class="primary" type="submit">Lưu kết nối</button><span class="muted" id="saved" role="status" style="align-self:center"></span></div>
   </form>

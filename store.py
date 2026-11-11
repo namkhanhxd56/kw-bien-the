@@ -31,8 +31,7 @@ class Store:
         self.root = root
         (root / "lists").mkdir(parents=True, exist_ok=True)
         (root / "analysis").mkdir(parents=True, exist_ok=True)
-        self.agent_seen = 0.0
-        self.agent_info = {}
+        self.agents: dict[str, dict] = {}   # máy chạy extension: id → thông tin lần báo gần nhất
         self._tt_cache: dict[Path, tuple[float, dict | None]] = {}   # tóm tắt file ASIN theo mtime
 
     # ------------------------------------------------------------ tiện ích file
@@ -219,6 +218,19 @@ class Store:
     def asin_dang_cho(self) -> set[str]:
         return {j["asin"] for j in self._jobs() if j["status"] in ("queued", "running")}
 
+    def bo_khoi_hang(self, slugs: list[str]) -> int:
+        """Bỏ mọi job đang chờ của các bộ này (job đang lấy dở để chạy cho xong). Trả số job đã bỏ."""
+        slugs, so = set(slugs), 0
+        with khoa:
+            jobs = self._jobs()
+            for j in jobs:
+                if j["slug"] in slugs and j["status"] == "queued":
+                    j.update(status="cancelled", finished_at=time.time())
+                    so += 1
+            if so:
+                self._save_jobs(jobs)
+        return so
+
     def cancel(self, slug: str, asin: str) -> None:
         with khoa:
             jobs = self._jobs()
@@ -227,7 +239,7 @@ class Store:
                     j.update(status="cancelled", finished_at=time.time())
             self._save_jobs(jobs)
 
-    def next_job(self, stale_sec: int = 600) -> dict | None:
+    def next_job(self, stale_sec: int = 600, may: str = "", ten_may: str = "") -> dict | None:
         """Job cũ nhất đang chờ. Job 'running' quá stale_sec coi như extension đã rớt → trả lại hàng."""
         with khoa:
             jobs = self._jobs()
@@ -242,7 +254,7 @@ class Store:
                 self._save_jobs(jobs)
                 return None
             j = min(q, key=lambda x: x["created_at"])
-            j.update(status="running", started_at=now)
+            j.update(status="running", started_at=now, may=may, ten_may=ten_may)
             self._save_jobs(jobs)
             return dict(j)
 

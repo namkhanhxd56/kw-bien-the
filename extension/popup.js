@@ -35,7 +35,7 @@ async function ve() {
   $("#c-running").checked = c.running;
   $("#c-capture").checked = c.capture;
   if (!daDienForm) {
-    $("#i-server").value = c.server; $("#i-token").value = c.token; $("#i-nghi").value = c.nghi;
+    $("#i-server").value = c.server; $("#i-token").value = c.token; $("#i-nghi").value = c.nghi; $("#i-ten").value = c.ten || "";
     daDienForm = true;
   }
 }
@@ -66,7 +66,7 @@ $("#f").addEventListener("submit", async e => {
     if (!ok) { $("#saved").textContent = "Chưa được cấp quyền truy cập " + server; return; }
   }
   const nghi = Math.min(300, Math.max(5, parseInt($("#i-nghi").value, 10) || 10));
-  await luu({ server, token: $("#i-token").value.trim(), nghi });
+  await luu({ server, token: $("#i-token").value.trim(), nghi, ten: $("#i-ten").value.trim() });
   $("#i-server").value = server; $("#i-nghi").value = nghi;
   $("#saved").textContent = "Đã lưu";
   setTimeout(() => { $("#saved").textContent = ""; }, 2000);

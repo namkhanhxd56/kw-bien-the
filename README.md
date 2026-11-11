@@ -87,7 +87,9 @@ Cách chạy một job:
 | `POST /api/agent/jobs/<id>/release` | H10 đăng xuất giữa chừng: trả job về hàng đợi, hoàn lượt |
 | `POST /api/agent/capture` | Body `{items: [...]}`: request do chế độ "Ghi lại" bắt được |
 
-- Header: `X-Agent-Token` (nếu không đặt `AGENT_TOKEN` thì server chỉ nhận từ localhost), `X-Agent-Version`, `X-Agent-H10` (`ok`/`logged_out`/`unknown`), `X-Agent-Ready`, `X-Agent-Running`. Thanh trên cùng của tool hiển thị các trạng thái này.
+- Header: `X-Agent-Token` (nếu không đặt `AGENT_TOKEN` thì server chỉ nhận từ localhost), `X-Agent-Version`, `X-Agent-H10` (`ok`/`logged_out`/`unknown`), `X-Agent-Ready`, `X-Agent-Running`, `X-Agent-Id` (id cố định của máy, từ 0.1.8), `X-Agent-Ten` (tên máy đặt trong popup). Thanh trên cùng của tool hiển thị các trạng thái này.
+- **Nhiều máy cùng chạy:** mỗi máy cài extension (tải ở `/extension.zip` hoặc trang `/hang-doi` → "Thêm máy"), cùng địa chỉ tool và token, đặt tên máy khác nhau. Mỗi máy lấy 1 ASIN một lần; ASIN đang lấy ở máy này thì máy khác bỏ qua, nên không lấy trùng. Các máy dùng chung một tài khoản H10 thì cộng chung lượt của tài khoản đó. Danh sách máy chỉ giữ trong bộ nhớ server: Railway khởi động lại thì máy hiện lại sau lần báo kế tiếp (≤ 30 giây).
+- **Trang `/hang-doi`:** xem bộ đang chờ theo thứ tự chạy, ASIN nào đang lấy ở máy nào, lọc theo nhóm mã / tìm kiếm, chọn nhiều bộ rồi bỏ khỏi hàng đợi (`POST /api/hang-doi/bo {slugs}`; ASIN đang lấy dở thì chạy nốt). Cột "Lượt riêng" là số lượt bớt được: ASIN dùng chung với bộ khác vẫn phải chạy. Nút "Dừng tool" (`POST /api/tool/dung {dung}`) cho mọi máy ngừng nhận job, hàng đợi giữ nguyên.
 - Job ở trạng thái "đang lấy" quá 10 phút sẽ tự quay lại hàng đợi.
 - Sơ đồ "cách C" dùng WebSocket. Bản này dùng HTTP hỏi định kỳ (stdlib), nội dung job và kết quả vẫn như cũ.
 - Tool đặt ở domain khác localhost: nhập địa chỉ trong popup, Chrome sẽ hỏi quyền truy cập domain đó. Server phải đặt `AGENT_TOKEN`, và trong popup nhập cùng token.

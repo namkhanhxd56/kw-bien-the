@@ -14,7 +14,7 @@
   <div class="spacer"></div>
   <div class="stat" id="st-agent" title="Extension lấy Cerebro trên Chrome"><span class="dot"></span><span>Extension: …</span></div>
   <div class="stat hide-sm" id="st-luot">Lượt H10 hôm nay: …</div>
-  <div class="stat hide-sm" id="st-hang">Hàng đợi: …</div>
+  <a class="stat hide-sm" id="st-hang" href="/hang-doi" title="Xem và bỏ bớt hàng đợi, xem các máy đang chạy">Hàng đợi: …</a>
   <button class="btn sm" id="b-dung" data-cap="kw.edit" data-need="edit" hidden>Dừng tool</button>
 </header>
 
@@ -119,7 +119,8 @@ async function loadStatus() {
     a.querySelector("span:last-child").textContent = "Extension: " + (!g.online ? "chưa kết nối"
       : g.h10 === "logged_out" ? "H10 chưa đăng nhập"
       : !g.san_sang ? "chưa có bộ lấy Cerebro"
-      : !g.nhan_job ? "đang tạm dừng" : "đang kết nối");
+      : !g.nhan_job ? "đang tạm dừng" : "đang kết nối")
+      + (g.so_may > 1 ? ` · ${g.so_may} máy` : "");
     $("#st-luot").textContent = `Lượt H10 hôm nay: ${s.luot_hom_nay}` + (s.gioi_han_ngay > 0 ? `/${s.gioi_han_ngay}` : "");
     $("#st-hang").textContent = `Hàng đợi: ${s.hang_doi}`;
     const b = $("#b-dung");

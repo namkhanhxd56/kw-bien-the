@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hàng đợi · KW Biến Thể</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/authui.js"></script>
+<style>
+  .hd-loc { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .hd-loc .input { width: auto; }
+  .hd-loc #q { flex: 1; min-width: 220px; }
+  .hd-bang { max-height: calc(100dvh - 260px); overflow-y: auto; }
+  .hd-bang td.asins { white-space: normal; min-width: 260px; }
+  .hd-bang .a { display: inline-flex; gap: 4px; align-items: center; margin: 2px 6px 2px 0; font-family: var(--mono); font-size: 12px; }
+  .hd-bang tr.chon td { background: var(--accent-soft); }
+  .hd-bang input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+  .buoc { margin: 8px 0 0 18px; padding: 0; }
+  .buoc li { margin-bottom: 6px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .may-loi { white-space: normal; max-width: 320px; color: var(--bad); }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><a href="/" style="color:inherit"><b>KW Biến Thể</b></a><span>Hàng đợi lấy keyword</span></div>
+  <div class="spacer"></div>
+  <a class="btn sm" href="/">Danh sách mã</a>
+  <button class="btn sm" id="b-dung" data-cap="kw.edit" data-need="edit" hidden>Dừng tool</button>
+</header>
+
+<main class="main"><div class="main-inner">
+  <div class="page-head"><div>
+    <h1>Hàng đợi lấy keyword</h1>
+    <div class="sub" id="tong">Đang đọc hàng đợi…</div>
+  </div></div>
+
+  <section class="card section" aria-labelledby="h-may">
+    <div class="section-head"><div class="grow"><h2 id="h-may">Máy đang chạy</h2>
+      <p>Mỗi máy lấy 1 ASIN một lần; nhiều máy thì chia nhau hàng đợi, không lấy trùng ASIN.</p></div>
+      <button class="btn sm" id="b-them" aria-expanded="false" aria-controls="them-may">Thêm máy</button>
+    </div>
+    <div class="section-body">
+      <div id="them-may" class="note info" hidden style="margin-bottom:14px">
+        <b>Cài extension lên máy khác</b>
+        <ol class="buoc">
+          <li><a href="/extension.zip" download>Tải extension (.zip)</a> rồi giải nén ra một thư mục cố định (đừng xoá sau khi cài).</li>
+          <li>Mở Chrome, vào <span class="mono">chrome://extensions</span>, bật <b>Developer mode</b>, bấm <b>Load unpacked</b> và chọn thư mục vừa giải nén.</li>
+          <li>Bấm biểu tượng extension → mục <b>Kết nối tool</b>: Địa chỉ tool <span class="mono" id="dia-chi"></span>, dán Agent token (giống máy đang chạy), đặt <b>Tên máy</b>, bấm Lưu kết nối và cho phép truy cập khi Chrome hỏi.</li>
+          <li>Đăng nhập Helium 10 trên Chrome đó. Máy sẽ hiện ở bảng dưới trong khoảng 30 giây.</li>
+        </ol>
+        <div class="small" style="margin-top:6px">Máy đang chạy bản cũ cũng nên cài lại bản này để có tên máy. Các máy dùng chung một tài khoản H10 thì cộng chung số lượt H10 của tài khoản đó.</div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Máy</th><th>Trạng thái</th><th>Đang lấy</th><th>H10</th><th>Bản</th><th>Báo lần cuối</th><th>Lỗi gần nhất</th></tr></thead>
+        <tbody id="may"><tr><td colspan="7" class="muted">Đang đọc…</td></tr></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section class="card section" aria-labelledby="h-ds">
+    <div class="section-head"><div class="grow"><h2 id="h-ds">Bộ đang chờ</h2>
+      <p>Chạy theo thứ tự xếp. Bỏ bộ khỏi hàng đợi không xoá bộ keyword; cần thì vào bộ bấm lấy keyword lại.</p></div></div>
+    <div class="section-body">
+      <div class="hd-loc">
+        <label class="sr-only" for="q">Tìm</label>
+        <input class="input" id="q" type="search" placeholder="Tìm mã, tên bộ, niche, ASIN" autocomplete="off">
+        <label class="sr-only" for="f-nhom">Nhóm mã</label>
+        <select class="input" id="f-nhom"><option value="">Mọi nhóm mã</option></select>
+        <label class="sr-only" for="f-tt">Trạng thái</label>
+        <select class="input" id="f-tt">
+          <option value="">Chờ và đang lấy</option>
+          <option value="cho">Chỉ đang chờ</option>
+          <option value="dang">Đang lấy</option>
+        </select>
+        <span class="muted small" id="dem" role="status"></span>
+      </div>
+      <div class="table-wrap hd-bang"><table>
+        <thead><tr>
+          <th><input type="checkbox" id="chon-het" aria-label="Chọn mọi bộ đang hiện"></th>
+          <th class="num">#</th><th>Mã</th><th>Bộ keyword</th><th>ASIN trong hàng đợi</th>
+          <th class="num" title="Số lượt Cerebro bớt được nếu bỏ bộ này (ASIN dùng chung với bộ khác vẫn phải chạy)">Lượt riêng</th>
+          <th>Xếp lúc</th>
+        </tr></thead>
+        <tbody id="ds"><tr><td colspan="7" class="muted">Đang đọc…</td></tr></tbody>
+      </table></div>
+    </div>
+  </section>
+</div></main>
+
+<div class="chon-bar" id="chon-bar" hidden>
+  <span>Đã chọn <b id="chon-so">0</b> bộ · bớt <b id="chon-luot">0</b> lượt</span>
+  <button class="btn sm danger" type="button" id="chon-bo-hang" data-cap="kw.edit" data-need="edit">Bỏ khỏi hàng đợi</button>
+  <button class="btn sm" type="button" id="chon-huy">Bỏ chọn</button>
+</div>
+<dialog id="dlg-confirm">
+  <div class="d-body"><h3 id="dc-title"></h3><div id="dc-text" class="small"></div></div>
+  <div class="d-foot"><button class="btn" id="dc-no">Huỷ</button><button class="btn primary" id="dc-yes"></button></div>
+</dialog>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = n => Number(n || 0).toLocaleString("vi-VN");
+const KY = {"2025-12": "12/2025", "current": "kỳ hiện tại"};
+const S = { d: null, chon: new Set() };
+
+async function api(path, opt = {}) {
+  const r = await fetch(path, opt);
+  const d = await r.json().catch(() => ({ ok: false, error: "Máy chủ trả về dữ liệu lạ" }));
+  if (!r.ok || d.ok === false) throw new Error(d.error || `Lỗi ${r.status}`);
+  return d;
+}
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+function toast(msg, bad) {
+  const t = $("#toast"); t.textContent = msg; t.className = "toast show" + (bad ? " bad" : "");
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = "toast", bad ? 5000 : 2500);
+}
+function confirmBox(title, html, yes) {
+  return new Promise(res => {
+    const d = $("#dlg-confirm");
+    $("#dc-title").textContent = title; $("#dc-text").innerHTML = html; $("#dc-yes").textContent = yes;
+    $("#dc-yes").onclick = () => { d.close(); res(true); };
+    $("#dc-no").onclick = () => { d.close(); res(false); };
+    d.onclose = () => res(false);
+    d.showModal();
+  });
+}
+const gio = t => t ? new Date(t * 1000).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }) : "—";
+function truoc(t) {
+  const s = Math.max(0, Date.now() / 1000 - t);
+  return s < 60 ? "vừa xong" : s < 3600 ? `${Math.round(s / 60)} phút trước` : `${Math.round(s / 3600)} giờ trước`;
+}
+const nhomMa = ma => (String(ma).match(/^[A-Za-z]+/) || ["Khác"])[0].toUpperCase();
+
+// ---------------------------------------------------------------- tải & vẽ
+async function tai() {
+  try {
+    S.d = await api("/api/hang-doi");
+  } catch (e) { $("#tong").textContent = "Không đọc được hàng đợi: " + e.message; return; }
+  const d = S.d, con = d.may.filter(m => m.online && m.nhan_job);
+  const ph = d.phut_moi_luot, conGio = ph && con.length ? d.so_luot * ph / con.length / 60 : null;
+  $("#tong").textContent = `${fmt(d.bo.length)} bộ · ${fmt(d.so_luot)} lượt Cerebro (mỗi ASIN 1 lượt)`
+    + (ph ? ` · khoảng ${ph} phút/lượt` : "")
+    + (d.tam_dung ? " · tool đang dừng" : con.length ? ` · ${con.length} máy đang chạy` + (conGio == null ? "" : ` → còn khoảng ${conGio < 1 ? Math.max(1, Math.round(conGio * 60)) + " phút" : conGio.toFixed(1).replace(".", ",") + " giờ"}`) : " · chưa có máy nào nhận job");
+  veNutDung(d.tam_dung);
+  veMay(d.may);
+  const nhom = [...new Set(d.bo.map(b => nhomMa(b.ma)))].sort();
+  const sel = $("#f-nhom"), giu = sel.value;
+  sel.innerHTML = '<option value="">Mọi nhóm mã</option>' + nhom.map(n => `<option value="${esc(n)}">${esc(n)} (${fmt(d.bo.filter(b => nhomMa(b.ma) === n).length)})</option>`).join("");
+  sel.value = nhom.includes(giu) ? giu : "";
+  // Bộ đã chạy xong thì bỏ khỏi lựa chọn
+  const con_slug = new Set(d.bo.map(b => b.slug));
+  for (const s of [...S.chon]) if (!con_slug.has(s)) S.chon.delete(s);
+  veDs();
+}
+
+function veMay(may) {
+  $("#may").innerHTML = !may.length
+    ? '<tr><td colspan="7" class="muted">Chưa có máy nào báo về từ lúc tool khởi động. Mở Chrome có cài extension để máy hiện ở đây.</td></tr>'
+    : may.map(m => {
+      const [tt, cls] = !m.online ? ["Mất kết nối", "off"] : d_tamDung() ? ["Tool đang dừng", "warn"]
+        : !m.nhan_job ? ["Tắt nhận job", "warn"] : m.h10 === "logged_out" ? ["H10 chưa đăng nhập", "off"]
+        : !m.san_sang ? ["Chưa có bộ lấy Cerebro", "warn"] : m.dang_lay ? ["Đang lấy", "on"] : ["Đang chờ job", "on"];
+      return `<tr><td><b>${esc(m.ten || (m.id === "may-cu" ? "Máy chưa đặt tên (bản cũ)" : "Máy chưa đặt tên"))}</b><div class="muted small mono">${esc(m.id)}</div></td>
+        <td><span class="stat"><span class="dot ${cls}"></span>${tt}</span></td>
+        <td class="mono">${esc(m.dang_lay || "—")}</td>
+        <td>${{ ok: "Đã đăng nhập", logged_out: "Chưa đăng nhập" }[m.h10] || "Chưa rõ"}</td>
+        <td class="mono">${esc(m.phien_ban || "—")}</td>
+        <td>${truoc(m.last_seen)}</td>
+        <td class="may-loi small">${esc(m.loi || "")}</td></tr>`;
+    }).join("");
+}
+const d_tamDung = () => !!S.d?.tam_dung;
+
+function locDs() {
+  const q = $("#q").value.trim().toLowerCase(), nhom = $("#f-nhom").value, tt = $("#f-tt").value;
+  return S.d.bo.filter(b =>
+    (!nhom || nhomMa(b.ma) === nhom)
+    && (!tt || (tt === "dang" ? b.asins.some(a => a.dang_lay) : !b.asins.some(a => a.dang_lay)))
+    && (!q || [b.ma, b.ten, b.niche, ...b.asins.map(a => a.asin)].join(" ").toLowerCase().includes(q)));
+}
+
+function veDs() {
+  if (!S.d) return;
+  const ds = locDs(), thu = new Map(S.d.bo.map((b, i) => [b.slug, i + 1]));
+  $("#dem").textContent = ds.length === S.d.bo.length ? `${fmt(ds.length)} bộ` : `${fmt(ds.length)} / ${fmt(S.d.bo.length)} bộ`;
+  const body = $("#ds"), cuon = body.closest(".hd-bang").scrollTop;
+  body.innerHTML = !ds.length
+    ? `<tr><td colspan="7"><div class="empty">${S.d.bo.length ? '<h3>Không có bộ nào khớp bộ lọc</h3><button class="btn sm" id="bo-loc">Bỏ tìm kiếm và lọc</button>' : "<h3>Hàng đợi trống</h3>Vào danh sách mã, chọn bộ rồi bấm lấy keyword để xếp vào hàng đợi."}</div></td></tr>`
+    : ds.map(b => {
+      const c = S.chon.has(b.slug);
+      return `<tr class="${c ? "chon" : ""}">
+        <td><input type="checkbox" data-slug="${esc(b.slug)}" ${c ? "checked" : ""} aria-label="Chọn ${esc(b.ma)}"></td>
+        <td class="num muted">${thu.get(b.slug)}</td>
+        <td><b>${esc(b.ma)}</b></td>
+        <td><a href="/kw-list/${encodeURIComponent(b.slug)}" target="_blank" rel="noopener">${esc(b.ten)}</a></td>
+        <td class="asins">${b.asins.map(a => `<span class="a">${esc(a.asin)}${a.dang_lay ? ` <span class="badge info">đang lấy${a.ten_may ? " · " + esc(a.ten_may) : ""}</span>` : ""}${a.bo_khac ? ` <span class="badge" title="ASIN này còn ${a.bo_khac} bộ khác cùng chờ: lấy 1 lần dùng chung">+${a.bo_khac} bộ</span>` : ""}${a.ky !== "2025-12" ? ` <span class="badge warn">${KY[a.ky] || esc(a.ky)}</span>` : ""}</span>`).join("")}</td>
+        <td class="num">${b.luot_rieng}</td>
+        <td class="muted">${gio(b.xep_luc)}</td></tr>`;
+    }).join("");
+  body.closest(".hd-bang").scrollTop = cuon;
+  $("#bo-loc")?.addEventListener("click", () => { $("#q").value = ""; $("#f-nhom").value = ""; $("#f-tt").value = ""; veDs(); });
+  const all = $("#chon-het");
+  const soChon = ds.filter(b => S.chon.has(b.slug)).length;
+  all.checked = ds.length > 0 && soChon === ds.length;
+  all.indeterminate = soChon > 0 && soChon < ds.length;
+  veThanhChon();
+}
+
+// Lượt bớt được khi bỏ cả nhóm đã chọn: ASIN chỉ các bộ đã chọn cùng chờ (không tính ASIN đang lấy)
+function luotBot() {
+  const conLai = new Map();
+  for (const b of S.d.bo) for (const a of b.asins) {
+    if (a.dang_lay) { conLai.set(a.asin, true); continue; }
+    if (!S.chon.has(b.slug)) conLai.set(a.asin, true);
+    else if (!conLai.has(a.asin)) conLai.set(a.asin, false);
+  }
+  return [...conLai.values()].filter(v => !v).length;
+}
+function veThanhChon() {
+  $("#chon-bar").hidden = !S.chon.size;
+  $("#chon-so").textContent = fmt(S.chon.size);
+  $("#chon-luot").textContent = fmt(luotBot());
+}
+
+function veNutDung(dung) {
+  const b = $("#b-dung");
+  b.hidden = false;
+  b.textContent = dung ? "Chạy tiếp tool" : "Dừng tool";
+  b.classList.toggle("primary", !!dung);
+}
+
+// ---------------------------------------------------------------- thao tác
+$("#ds").addEventListener("change", e => {
+  const s = e.target.dataset?.slug;
+  if (!s) return;
+  e.target.checked ? S.chon.add(s) : S.chon.delete(s);
+  e.target.closest("tr").classList.toggle("chon", e.target.checked);
+  veDs();
+});
+$("#chon-het").addEventListener("change", e => {
+  for (const b of locDs()) e.target.checked ? S.chon.add(b.slug) : S.chon.delete(b.slug);
+  veDs();
+});
+$("#chon-huy").onclick = () => { S.chon.clear(); veDs(); };
+$("#chon-bo-hang").onclick = async () => {
+  const n = S.chon.size, luot = luotBot();
+  const dang = S.d.bo.filter(b => S.chon.has(b.slug) && b.asins.some(a => a.dang_lay)).length;
+  const ok = await confirmBox(`Bỏ ${fmt(n)} bộ khỏi hàng đợi?`,
+    `Hàng đợi bớt ${fmt(luot)} lượt Cerebro. Bộ keyword và dữ liệu đã lấy vẫn giữ; cần thì vào bộ bấm lấy keyword lại.`
+    + (dang ? `<br>${fmt(dang)} bộ có ASIN đang lấy dở: ASIN đó chạy nốt cho xong, phần còn lại được bỏ.` : ""),
+    `Bỏ ${fmt(n)} bộ`);
+  if (!ok) return;
+  try {
+    const r = await post("/api/hang-doi/bo", { slugs: [...S.chon] });
+    toast(`Đã bỏ ${fmt(r.da_bo)} ASIN của ${fmt(n)} bộ khỏi hàng đợi`);
+    S.chon.clear();
+    await tai();
+  } catch (e) { toast("Không bỏ được: " + e.message, true); }
+};
+$("#b-dung").onclick = async e => {
+  const dung = !S.d?.tam_dung, b = e.currentTarget;
+  b.disabled = true;
+  try {
+    await post("/api/tool/dung", { dung });
+    toast(dung ? "Đã dừng tool: không nhận job mới, hàng đợi giữ nguyên" : "Tool chạy tiếp hàng đợi");
+    await tai();
+  } catch (err) { toast("Không đổi được trạng thái tool: " + err.message, true); }
+  finally { b.disabled = false; }
+};
+$("#b-them").onclick = e => {
+  const o = $("#them-may"), mo = o.hidden;
+  o.hidden = !mo; e.currentTarget.setAttribute("aria-expanded", String(mo));
+};
+$("#dia-chi").textContent = location.origin;
+let hen;
+$("#q").addEventListener("input", () => { clearTimeout(hen); hen = setTimeout(veDs, 150); });
+$("#f-nhom").addEventListener("change", veDs);
+$("#f-tt").addEventListener("change", veDs);
+
+new MutationObserver(() => AUTHUI.apply($("#ds"))).observe($("#ds"), { childList: true });
+AUTHUI.boot().finally(tai);
+setInterval(() => { if (!document.hidden) tai(); }, 20000);
+</script>
+</body>
+</html>
