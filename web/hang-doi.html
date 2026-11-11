@@ -60,8 +60,16 @@
 
   <section class="card section" aria-labelledby="h-ds">
     <div class="section-head"><div class="grow"><h2 id="h-ds">Bộ đang chờ</h2>
-      <p>Chạy theo thứ tự xếp. Bỏ bộ khỏi hàng đợi không xoá bộ keyword; cần thì vào bộ bấm lấy keyword lại.</p></div></div>
+      <p>Chạy từ trên xuống: bộ ưu tiên trước, còn lại theo giờ xếp. Bỏ bộ khỏi hàng đợi không xoá bộ keyword; cần thì vào bộ bấm lấy keyword lại.</p></div>
+      <button class="btn sm" id="b-ut" aria-expanded="false" aria-controls="ut" data-cap="kw.edit" data-need="edit">Ưu tiên mã</button>
+    </div>
     <div class="section-body">
+      <div id="ut" class="note info" hidden style="margin-bottom:14px">
+        <label for="ut-ma"><b>Dán mã cần chạy trước</b> (mỗi dòng một mã, hoặc cách nhau bằng dấu phẩy / khoảng trắng)</label>
+        <textarea class="input mono" id="ut-ma" rows="5" style="margin-top:6px" placeholder="BOH1057&#10;MAU2025-032&#10;BSV478"></textarea>
+        <div class="small" style="margin:6px 0 8px">Làm xong từng mã một. Mã có ASIN dùng chung với nhiều mã trong danh sách chạy trước; trong mỗi mã, ASIN dùng chung nhiều chạy trước. Lần ưu tiên sau đứng trước lần trước. Chỉ xếp lại ASIN đang chờ, không tạo bộ hay xếp thêm ASIN.</div>
+        <div class="row"><button class="btn sm primary" id="ut-chay">Đưa lên đầu hàng đợi</button><button class="btn sm" id="ut-bo">Bỏ mọi ưu tiên</button><span class="small" id="ut-kq" role="status"></span></div>
+      </div>
       <div class="hd-loc">
         <label class="sr-only" for="q">Tìm</label>
         <input class="input" id="q" type="search" placeholder="Tìm mã, tên bộ, niche, ASIN" autocomplete="off">
@@ -142,6 +150,7 @@ async function tai() {
   const d = S.d, con = d.may.filter(m => m.online && m.nhan_job);
   const ph = d.phut_moi_luot, conGio = ph && con.length ? d.so_luot * ph / con.length / 60 : null;
   $("#tong").textContent = `${fmt(d.bo.length)} bộ · ${fmt(d.so_luot)} lượt Cerebro (mỗi ASIN 1 lượt)`
+    + (d.luot_uu_tien ? ` · ${fmt(d.luot_uu_tien)} lượt ưu tiên` : "")
     + (ph ? ` · khoảng ${ph} phút/lượt` : "")
     + (d.tam_dung ? " · tool đang dừng" : con.length ? ` · ${con.length} máy đang chạy` + (conGio == null ? "" : ` → còn khoảng ${conGio < 1 ? Math.max(1, Math.round(conGio * 60)) + " phút" : conGio.toFixed(1).replace(".", ",") + " giờ"}`) : " · chưa có máy nào nhận job");
   veNutDung(d.tam_dung);
@@ -182,6 +191,13 @@ function locDs() {
     && (!q || [b.ma, b.ten, b.niche, ...b.asins.map(a => a.asin)].join(" ").toLowerCase().includes(q)));
 }
 
+// Bộ không nằm trong danh sách ưu tiên vẫn có thể có ASIN dùng chung được ưu tiên: ghi rõ bao nhiêu ASIN
+function nhanUuTien(b) {
+  const n = b.asins.filter(a => a.uu_tien).length;
+  return !n ? "" : n === b.asins.filter(a => !a.dang_lay).length ? ' <span class="badge ok">ưu tiên</span>'
+    : ` <span class="badge ok" title="ASIN dùng chung với mã được ưu tiên">ưu tiên ${n}/${b.asins.length} ASIN</span>`;
+}
+
 function veDs() {
   if (!S.d) return;
   const ds = locDs(), thu = new Map(S.d.bo.map((b, i) => [b.slug, i + 1]));
@@ -194,7 +210,7 @@ function veDs() {
       return `<tr class="${c ? "chon" : ""}">
         <td><input type="checkbox" data-slug="${esc(b.slug)}" ${c ? "checked" : ""} aria-label="Chọn ${esc(b.ma)}"></td>
         <td class="num muted">${thu.get(b.slug)}</td>
-        <td><b>${esc(b.ma)}</b></td>
+        <td><b>${esc(b.ma)}</b>${nhanUuTien(b)}</td>
         <td><a href="/kw-list/${encodeURIComponent(b.slug)}" target="_blank" rel="noopener">${esc(b.ten)}</a></td>
         <td class="asins">${b.asins.map(a => `<span class="a">${esc(a.asin)}${a.dang_lay ? ` <span class="badge info">đang lấy${a.ten_may ? " · " + esc(a.ten_may) : ""}</span>` : ""}${a.bo_khac ? ` <span class="badge" title="ASIN này còn ${a.bo_khac} bộ khác cùng chờ: lấy 1 lần dùng chung">+${a.bo_khac} bộ</span>` : ""}${a.ky !== "2025-12" ? ` <span class="badge warn">${KY[a.ky] || esc(a.ky)}</span>` : ""}</span>`).join("")}</td>
         <td class="num">${b.luot_rieng}</td>
@@ -275,6 +291,32 @@ $("#b-them").onclick = e => {
   o.hidden = !mo; e.currentTarget.setAttribute("aria-expanded", String(mo));
 };
 $("#dia-chi").textContent = location.origin;
+$("#b-ut").onclick = e => {
+  const o = $("#ut"), mo = o.hidden;
+  o.hidden = !mo; e.currentTarget.setAttribute("aria-expanded", String(mo));
+  if (mo) $("#ut-ma").focus();
+};
+$("#ut-chay").onclick = async e => {
+  const ma = $("#ut-ma").value.split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  if (!ma.length) { $("#ut-kq").textContent = "Dán ít nhất một mã"; $("#ut-ma").focus(); return; }
+  const nut = e.currentTarget;
+  nut.disabled = true;
+  try {
+    const r = await post("/api/hang-doi/uu-tien", { ma });
+    $("#ut-kq").textContent = `Đã ưu tiên ${fmt(r.so_ma)} mã · ${fmt(r.so_asin)} lượt`
+      + (r.khong_trong_hang.length ? ` · ${fmt(r.khong_trong_hang.length)} mã không có ASIN đang chờ: ${r.khong_trong_hang.slice(0, 30).join(", ")}${r.khong_trong_hang.length > 30 ? "…" : ""}` : "");
+    toast(`Đã đưa ${fmt(r.so_ma)} mã lên đầu hàng đợi`);
+    $("#f-tt").value = ""; await tai();
+  } catch (err) { toast("Không ưu tiên được: " + err.message, true); }
+  finally { e.currentTarget.disabled = false; }
+};
+$("#ut-bo").onclick = async () => {
+  if (!await confirmBox("Bỏ mọi ưu tiên?", "Hàng đợi chạy lại theo giờ xếp.", "Bỏ ưu tiên")) return;
+  try {
+    const r = await post("/api/hang-doi/uu-tien", { bo: true });
+    toast(`Đã bỏ ưu tiên ${fmt(r.da_bo)} ASIN`); $("#ut-kq").textContent = ""; await tai();
+  } catch (err) { toast("Không bỏ được: " + err.message, true); }
+};
 let hen;
 $("#q").addEventListener("input", () => { clearTimeout(hen); hen = setTimeout(veDs, 150); });
 $("#f-nhom").addEventListener("change", veDs);

@@ -44,7 +44,7 @@ import auth
 import cerebro
 import engine
 import lark
-from store import KY_CHINH, KY_HIEN_TAI, Store
+from store import KY_CHINH, KY_HIEN_TAI, Store, thu_tu_chay
 
 GOC = Path(__file__).resolve().parent
 WEB = GOC / "web"
@@ -184,6 +184,30 @@ def tinh_bien_the(meta: dict) -> dict:
     return out
 
 
+def sap_uu_tien(ds: list[str], cho: dict[str, set], dang: set) -> tuple[list[str], list[str]]:
+    """Xếp ASIN của các mã cần ưu tiên → (thứ tự ASIN, thứ tự mã).
+    w(ASIN) = số mã trong danh sách cùng chờ ASIN đó. Mỗi bước chọn mã có ASIN dùng chung nhiều nhất
+    (rồi ít ASIN còn lại nhất để xong sớm, rồi tổng w, rồi thứ tự người dùng dán), chạy hết ASIN của mã đó
+    (w cao trước) rồi mới sang mã kế. ASIN đang lấy dở không xếp lại."""
+    w: dict[str, int] = {}
+    for a_s in cho.values():
+        for a in a_s:
+            w[a] = w.get(a, 0) + 1
+    xong_a, thu_tu, thu_tu_ma = set(dang), [], []
+    con = [m for m in ds if m in cho]
+    while con:
+        def diem(m):
+            r = cho[m] - xong_a
+            return (max((w[a] for a in r), default=0), -len(r), sum(w[a] for a in r), -ds.index(m))
+        m = max(con, key=diem)
+        con.remove(m)
+        r = sorted(cho[m] - xong_a, key=lambda a: (-w[a], a))
+        thu_tu += r
+        xong_a |= set(r)
+        thu_tu_ma.append(m)
+    return thu_tu, thu_tu_ma
+
+
 def danh_sach_may() -> list[dict]:
     """Các máy extension đã báo về (từ lúc server chạy), máy báo gần nhất trước; kèm ASIN đang lấy."""
     now, dang = time.time(), {}
@@ -314,6 +338,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._dung_tool()
                 if path == "/api/hang-doi/bo":
                     return self._bo_hang_doi()
+                if path == "/api/hang-doi/uu-tien":
+                    return self._uu_tien()
                 if path == "/api/lists":
                     return self._create_list()
                 m = re.fullmatch(r"/api/analysis/([^/]+)", path)
@@ -535,14 +561,14 @@ class Handler(BaseHTTPRequestHandler):
         dang = {j["asin"] for j in cho if j["status"] == "running"}
         meta = {m["slug"]: m for m in store.lists_by_ma().values()}
         bo: dict[str, dict] = {}
-        for j in sorted(cho, key=lambda x: x["created_at"]):
+        for j in sorted(cho, key=lambda x: (x["status"] != "running", thu_tu_chay(x))):
             b = bo.get(j["slug"])
             if not b:
                 m = meta.get(j["slug"]) or store.get_list(j["slug"]) or {}
                 b = bo[j["slug"]] = {"slug": j["slug"], "ma": m.get("ma", ""), "ten": m.get("ten", j["slug"]),
                                      "niche": m.get("niche", ""), "xep_luc": j["created_at"],
-                                     "asins": [], "luot_rieng": 0}
-            b["asins"].append({"asin": j["asin"], "dang_lay": j["status"] == "running",
+                                     "uu_tien": bool(j.get("uu_tien")), "asins": [], "luot_rieng": 0}
+            b["asins"].append({"asin": j["asin"], "dang_lay": j["status"] == "running", "uu_tien": bool(j.get("uu_tien")),
                                "ten_may": j.get("ten_may") or "", "ky": j["period"],
                                "bo_khac": len(theo_asin[j["asin"]]) - 1})
             # Lượt chỉ bộ này cần: bỏ bộ là bớt lượt đó (ASIN dùng chung thì bộ khác vẫn chờ)
@@ -553,8 +579,32 @@ class Handler(BaseHTTPRequestHandler):
                      if j.get("started_at") and j.get("finished_at") and j["status"] in ("done", "empty", "failed")
                      and not j.get("dung_lai_tu") and j["finished_at"] > time.time() - 6 * 3600)
         self._json({"ok": True, "bo": list(bo.values()), "so_luot": len(theo_asin),
+                    "luot_uu_tien": len({j["asin"] for j in cho if j.get("uu_tien") and j["status"] == "queued"}),
                     "phut_moi_luot": round(gan[len(gan) // 2] / 60, 1) if gan else None,
                     "may": danh_sach_may(), "tam_dung": store.tam_dung()})
+
+    def _uu_tien(self):
+        """Ưu tiên danh sách mã: làm xong từng mã một; mã có ASIN dùng chung với nhiều mã trong danh sách
+        làm trước, trong mã thì ASIN dùng chung nhiều chạy trước. Body {ma: [...]} hoặc {bo: true} để bỏ ưu tiên."""
+        b = self._jbody()
+        if b.get("bo"):
+            return self._json({"ok": True, "da_bo": store.bo_uu_tien()})
+        ds = list(dict.fromkeys(str(x).strip().upper() for x in (b.get("ma") or []) if str(x).strip()))
+        if not ds:
+            raise ValueError("Chưa nhập mã nào")
+        ma_cua = store.ma_cua_slug()
+        cho: dict[str, set] = {}          # mã → ASIN đang chờ
+        dang = set()
+        for j in store._jobs():
+            ma = (ma_cua.get(j["slug"]) or "").upper()
+            if j["status"] == "running":
+                dang.add(j["asin"])
+            if ma in ds and j["status"] == "queued":
+                cho.setdefault(ma, set()).add(j["asin"])
+        thu_tu, xong = sap_uu_tien(ds, cho, dang)
+        so_job = store.dat_uu_tien(thu_tu)
+        self._json({"ok": True, "so_ma": len(xong), "so_asin": len(thu_tu), "so_job": so_job,
+                    "thu_tu_ma": xong, "khong_trong_hang": [m for m in ds if m not in cho]})
 
     def _bo_hang_doi(self):
         slugs = [str(x) for x in (self._jbody().get("slugs") or [])][:5000]
@@ -663,7 +713,7 @@ class Handler(BaseHTTPRequestHandler):
             # Kỳ 12/2025 không có kết quả → bỏ bộ lọc kỳ, lấy kỳ hiện tại
             store.update_job(job_id, status="empty", rows=0, finished_at=time.time())
             store.doi_ky_cho(j["asin"], job_id, KY_HIEN_TAI)
-            store.enqueue(j["slug"], j["asin"], period=KY_HIEN_TAI, attempt=j["attempt"] + 1)
+            store.enqueue(j["slug"], j["asin"], period=KY_HIEN_TAI, attempt=j["attempt"] + 1, uu_tien=j.get("uu_tien"))
             return self._json({"ok": True, "tiep": "thu_ky_hien_tai"})
         # Kỳ hiện tại là sản phẩm mới: cố ý không lọc SV/rank, nên không cảnh báo về bộ lọc
         canh_bao = cerebro.kiem_bo_loc(rows, SV_MIN, RANK_MIN, RANK_MAX) if rows and period_used == KY_CHINH else []

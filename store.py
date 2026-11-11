@@ -26,6 +26,13 @@ KY_HIEN_TAI = "current"   # dự phòng khi kỳ chuẩn không có dữ liệu
 khoa = threading.RLock()
 
 
+def thu_tu_chay(j: dict) -> tuple:
+    """Khoá sắp hàng đợi: job ưu tiên trước (lần ưu tiên mới nhất trước, rồi theo thứ tự đã xếp),
+    còn lại theo giờ xếp."""
+    u = j.get("uu_tien")
+    return (0, -u[0], u[1], j["created_at"]) if u else (1, 0, 0, j["created_at"])
+
+
 class Store:
     def __init__(self, root: Path):
         self.root = root
@@ -89,6 +96,15 @@ class Store:
             if m and m.get("ma") and (m["ma"] not in best or m["updated_at"] > best[m["ma"]]["updated_at"]):
                 best[m["ma"]] = m
         return best
+
+    def ma_cua_slug(self) -> dict[str, str]:
+        """slug → mã nội bộ, cho mọi bộ (kể cả bộ cũ của mã trùng)."""
+        out = {}
+        for f in (self.root / "lists").glob("*/meta.json"):
+            m = self._read(f, None)
+            if m and m.get("ma"):
+                out[f.parent.name] = m["ma"]
+        return out
 
     def save_list(self, meta: dict) -> dict:
         with khoa:
@@ -178,15 +194,20 @@ class Store:
     def jobs_for(self, slug: str) -> list[dict]:
         return [j for j in self._jobs() if j["slug"] == slug]
 
-    def enqueue(self, slug: str, asin: str, period: str = KY_CHINH, attempt: int = 1) -> dict:
+    def enqueue(self, slug: str, asin: str, period: str = KY_CHINH, attempt: int = 1, uu_tien=None) -> dict:
         with khoa:
             jobs = self._jobs()
             for j in jobs:
                 if j["slug"] == slug and j["asin"] == asin and j["status"] in ("queued", "running"):
                     return j
+            # ASIN đã được ưu tiên ở bộ khác thì job mới cùng ASIN đứng cùng chỗ
+            uu_tien = uu_tien or next((x["uu_tien"] for x in jobs if x["asin"] == asin and x.get("uu_tien")
+                                       and x["status"] in ("queued", "running")), None)
             j = {"id": uuid.uuid4().hex[:12], "slug": slug, "asin": asin, "period": period,
                  "attempt": attempt, "status": "queued", "created_at": time.time(),
                  "started_at": None, "finished_at": None, "error": "", "rows": None}
+            if uu_tien:
+                j["uu_tien"] = uu_tien
             jobs.append(j)
             self._save_jobs(jobs)
             return j
@@ -217,6 +238,30 @@ class Store:
 
     def asin_dang_cho(self) -> set[str]:
         return {j["asin"] for j in self._jobs() if j["status"] in ("queued", "running")}
+
+    def dat_uu_tien(self, asins: list[str]) -> int:
+        """Đưa các ASIN này lên đầu hàng đợi theo đúng thứ tự cho. Lần ưu tiên sau đứng trước lần trước.
+        Trả số job được ưu tiên."""
+        lo, vi_tri, so = time.time(), {a: i for i, a in enumerate(asins)}, 0
+        with khoa:
+            jobs = self._jobs()
+            for j in jobs:
+                if j["status"] == "queued" and j["asin"] in vi_tri:
+                    j["uu_tien"] = [lo, vi_tri[j["asin"]]]
+                    so += 1
+            if so:
+                self._save_jobs(jobs)
+        return so
+
+    def bo_uu_tien(self) -> int:
+        so = 0
+        with khoa:
+            jobs = self._jobs()
+            for j in jobs:
+                if j.pop("uu_tien", None) and j["status"] == "queued":
+                    so += 1
+            self._save_jobs(jobs)
+        return so
 
     def bo_khoi_hang(self, slugs: list[str]) -> int:
         """Bỏ mọi job đang chờ của các bộ này (job đang lấy dở để chạy cho xong). Trả số job đã bỏ."""
@@ -253,7 +298,7 @@ class Store:
             if not q:
                 self._save_jobs(jobs)
                 return None
-            j = min(q, key=lambda x: x["created_at"])
+            j = min(q, key=thu_tu_chay)
             j.update(status="running", started_at=now, may=may, ten_may=ten_may)
             self._save_jobs(jobs)
             return dict(j)
