@@ -63,11 +63,13 @@ function toast(m, bad, hanh) {
 
 async function load() {
   try {
-    const r = await fetch("/api/lists/" + encodeURIComponent(slug));
+    // Bộ keyword và phần chia biến thể tải cùng lúc (không đợi nhau), quyền đọc song song
+    const [r, bt] = await Promise.all([fetch("/api/lists/" + encodeURIComponent(slug)), layBT()]);
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || "Không đọc được");
     L = d.list; document.title = L.ten; $("#crumb").textContent = L.ten;
-    await loadBT();
+    BT = L.rows.length ? bt : null;
+    await QUYEN;   // vẽ sau khi biết quyền: vẽ trước thì nút sửa bị mờ oan
     render();
     if (L.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) setTimeout(load, 5000);
   } catch (e) {
@@ -118,14 +120,15 @@ function ganChon(root) {
   capNhatChon();
 }
 
-async function loadBT() {
-  if (!L.rows.length) { BT = null; return; }
+async function layBT() {
   try {
     const r = await fetch(`/api/lists/${encodeURIComponent(slug)}/bien-the`);
     const d = await r.json();
-    BT = r.ok && d.ok ? d : { loi: d.error || "Không chia được biến thể" };
-  } catch (e) { BT = { loi: e.message }; }
+    return r.ok && d.ok ? d : { loi: d.error || "Không chia được biến thể" };
+  } catch (e) { return { loi: e.message }; }
 }
+
+async function loadBT() { BT = L.rows.length ? await layBT() : null; }
 
 async function datNhan(ten, nhan) {
   try {
@@ -434,8 +437,9 @@ $("#chon-chep").onclick = () => chep([...CHON], "keyword đã chọn");
 $("#chon-bo").onclick = () => { CHON.clear(); document.querySelectorAll("input[data-kw]").forEach(c => { c.checked = false; }); capNhatChon(); };
 $("#chon-xoa").onclick = () => xoaKw([...CHON]);
 
-// Đọc quyền trước rồi mới vẽ: vẽ trước thì nút sửa bị mờ oan (lúc đó chưa biết quyền)
-AUTHUI.boot().finally(load);
+// Đọc quyền song song với dữ liệu; load() đợi QUYEN xong mới vẽ (vẽ trước thì nút sửa bị mờ oan)
+const QUYEN = AUTHUI.boot().catch(() => {});
+load();
 </script>
 </body>
 </html>

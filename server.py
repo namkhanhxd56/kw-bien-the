@@ -33,10 +33,12 @@ import mimetypes
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -164,8 +166,53 @@ def da_xoa(slug: str) -> list[str]:
     return store._read(store.list_dir(slug) / "da_xoa.json", [])
 
 
+# ---- Nhớ kết quả đọc bộ / chia biến thể: mở trang bộ keyword không phải đọc lại mọi file ASIN và chia lại
+# biến thể khi dữ liệu không đổi. Khoá nhớ = mtime + dung lượng các file đầu vào; đổi file nào là tính lại.
+_bo_cache: OrderedDict = OrderedDict()
+_bo_cache_khoa = threading.Lock()
+BO_CACHE_MAX = 24   # mỗi bộ vài MB trong RAM, giữ các bộ mở gần nhất
+
+
+def _chu_ky(*paths: Path) -> tuple:
+    out = []
+    for p in paths:
+        try:
+            st = p.stat()
+            out.append((st.st_mtime_ns, st.st_size))
+        except FileNotFoundError:
+            out.append(None)
+    return tuple(out)
+
+
+def _nho(slug: str, loai: str, chu_ky: tuple, tinh):
+    k = (slug, loai)
+    with _bo_cache_khoa:
+        c = _bo_cache.get(k)
+        if c and c[0] == chu_ky:
+            _bo_cache.move_to_end(k)
+            return c[1]
+    v = tinh()
+    with _bo_cache_khoa:
+        _bo_cache[k] = (chu_ky, v)
+        _bo_cache.move_to_end(k)
+        while len(_bo_cache) > BO_CACHE_MAX:
+            _bo_cache.popitem(last=False)
+    return v
+
+
+def _chu_ky_du_lieu(meta: dict) -> tuple:
+    d = store.list_dir(meta["slug"])
+    asins = tuple(meta.get("asins") or [])
+    return (asins,) + _chu_ky(*(d / f"{a}.json" for a in asins), d / "da_xoa.json")
+
+
 def du_lieu_bo(meta: dict) -> tuple[dict, list[dict], dict]:
-    """Dữ liệu từng ASIN và dòng đã gộp của một bộ, đã bỏ các keyword người dùng xoá."""
+    """Dữ liệu từng ASIN và dòng đã gộp của một bộ, đã bỏ các keyword người dùng xoá.
+    Kết quả được nhớ và dùng chung: nơi gọi KHÔNG được sửa data / rows trả về."""
+    return _nho(meta["slug"], "du_lieu", _chu_ky_du_lieu(meta), lambda: _doc_du_lieu_bo(meta))
+
+
+def _doc_du_lieu_bo(meta: dict) -> tuple[dict, list[dict], dict]:
     bo = {k.lower() for k in da_xoa(meta["slug"])}
     data = {}
     for a, d in store.all_asin_data(meta["slug"], meta.get("asins") or []).items():
@@ -197,9 +244,19 @@ def cau_hinh(ma: str) -> dict:
 
 
 def tinh_bien_the(meta: dict) -> dict:
-    """Chia biến thể 3 tầng (engine.chia_nhom) cho một bộ keyword, nhãn người dùng sửa đè lên nhãn cấu hình."""
+    """Chia biến thể 3 tầng (engine.chia_nhom) cho một bộ keyword, nhãn người dùng sửa đè lên nhãn cấu hình.
+    Nhớ theo file đầu vào (dữ liệu ASIN, keyword đã xoá, nhãn, cấu hình mã) — nơi gọi không được sửa kết quả."""
+    slug = meta["slug"]
+    chu_ky = (_chu_ky_du_lieu(meta) + _chu_ky(store.list_dir(slug) / "danh_gia.json", CAU_HINH / "neg-mac-dinh.json",
+                                              CAU_HINH / f"{store.slugify(meta['ma']).upper()}.json")
+              + (time.strftime("%Y"),))
+    return _nho(slug, "bien_the", chu_ky, lambda: _chia_bien_the(meta))
+
+
+def _chia_bien_the(meta: dict) -> dict:
     slug = meta["slug"]
     data, rows, stats = du_lieu_bo(meta)
+    rows = [dict(r) for r in rows]   # chia_nhom ghi thêm khoá vào từng dòng: chép để không bẩn bản đang nhớ
     data = {a: d for a, d in data.items() if d.get("rows")}
     ch = cau_hinh(meta["ma"])
     dg = {**ch["danh_gia"], **store._read(store.list_dir(slug) / "danh_gia.json", {})}
