@@ -130,6 +130,11 @@ def trang_thai_asin(slug: str, asins: list[str], jobs: list[dict] | None = None)
     return out
 
 
+def bo_theo(slug_hoac_ma: str) -> dict | None:
+    """Bộ keyword theo tên bộ, hoặc theo Mã sản phẩm (bộ mới nhất của mã) — để agent chỉ cần biết Mã."""
+    return store.get_list(slug_hoac_ma) or store.list_by_ma(slug_hoac_ma.strip().upper())
+
+
 def da_xoa(slug: str) -> list[str]:
     """Keyword người dùng đã bỏ khỏi bộ (ô tích → Xoá), lưu theo bộ; khôi phục được."""
     return store._read(store.list_dir(slug) / "da_xoa.json", [])
@@ -317,10 +322,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": True, "analysis": store.get_analysis(m.group(1))})
                 m = re.fullmatch(r"/api/lists/([^/]+)", path)
                 if m:
-                    meta = store.get_list(m.group(1))
+                    meta = bo_theo(m.group(1))
                     if not meta:
                         return self._err(404, "Chưa có bộ keyword này")
-                    return self._json({"ok": True, "list": tom_tat_bo(meta, kem_dong=q.get("rows") != ["0"])})
+                    return self._json({"ok": True, "list": {"da_xoa": da_xoa(meta["slug"]),
+                                                            **tom_tat_bo(meta, kem_dong=q.get("rows") != ["0"])}})
                 m = re.fullmatch(r"/api/lists/([^/]+)/export\.csv", path)
                 if m:
                     return self._export(m.group(1))
@@ -494,7 +500,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "so_kw": len(rows), "canh_bao": canh_bao, "list": tom_tat_bo(meta)})
 
     def _export(self, slug: str):
-        meta = store.get_list(slug)
+        meta = bo_theo(slug)
         if not meta:
             return self._err(404, "Chưa có bộ keyword này")
         t = tom_tat_bo(meta, kem_dong=True)
@@ -512,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
     def _final(self, slug: str, dang: str, q: dict):
         """Bộ keyword final đã chia biến thể: .xlsx (mỗi loại một sheet) hoặc .md (cho agent đọc).
         Nhận cả tên bộ lẫn Mã sản phẩm (/api/lists/BSV051/final.md) để agent khỏi phải tra tên bộ."""
-        meta = store.get_list(slug) or store.lists_by_ma().get(slug.strip().upper())
+        meta = bo_theo(slug)
         if not meta:
             return self._err(404, "Chưa có bộ keyword này")
         L, BT = tom_tat_bo(meta, kem_dong=True), tinh_bien_the(meta)
@@ -525,16 +531,17 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, md.encode("utf-8"), "text/markdown; charset=utf-8")
 
     def _bien_the(self, slug: str):
-        meta = store.get_list(slug)
+        meta = bo_theo(slug)
         if not meta:
             return self._err(404, "Chưa có bộ keyword này")
         self._json(tinh_bien_the(meta))
 
     def _dat_nhan(self, slug: str):
         # Nhãn so với sản phẩm cho một biến thể (Sát / Xa / Không hợp; rỗng = bỏ nhãn), lưu riêng cho bộ này
-        meta = store.get_list(slug)
+        meta = bo_theo(slug)
         if not meta:
             return self._err(404, "Chưa có bộ keyword này")
+        slug = meta["slug"]
         b = self._jbody()
         ten, nhan = str(b.get("ten") or "").strip(), str(b.get("nhan") or "").strip()
         if not ten or (nhan and nhan not in NHAN):
@@ -547,9 +554,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _xoa_kw(self, slug: str):
         # Bỏ keyword khỏi bộ ({keywords}), hoặc khôi phục ({keywords, khoi_phuc: true}; khoi_phuc "het" = tất cả)
-        meta = store.get_list(slug)
+        meta = bo_theo(slug)
         if not meta:
             return self._err(404, "Chưa có bộ keyword này")
+        slug = meta["slug"]
         b = self._jbody()
         kws = [str(k).strip() for k in b.get("keywords") or [] if str(k).strip()]
         cu = da_xoa(slug)

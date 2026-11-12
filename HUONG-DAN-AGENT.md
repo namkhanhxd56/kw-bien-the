@@ -1,6 +1,13 @@
-# Hướng dẫn agent đọc bộ keyword final (KW Biến Thể)
+# Hướng dẫn agent đọc và xử lý bộ keyword final (KW Biến Thể)
 
-Dành cho Claude hoặc agent khác cần đọc bộ keyword final của một mã sản phẩm. Ví dụ dùng khi viết content listing, chọn keyword quảng cáo hoặc soát niche.
+Dành cho Claude hoặc agent khác cần đọc, soát và xử lý bộ keyword final của một mã sản phẩm. Ví dụ: viết content listing, chọn keyword quảng cáo, soát niche, loại keyword sai sản phẩm.
+
+**Tóm tắt:** có link `<máy chủ>/kw-list/<bộ>` thì
+- đọc: `GET <máy chủ>/api/lists/<bộ>/final.md`
+- xoá keyword: `POST <máy chủ>/api/lists/<bộ>/xoa`
+- loại biến thể: `POST <máy chủ>/api/lists/<bộ>/bien-the/nhan`
+
+`<bộ>` là tên bộ trong link, hoặc chỉ cần Mã sản phẩm (ví dụ `BSV051`).
 
 Máy chủ: `https://web-production-f71ebe.up.railway.app`
 Bản mới nhất của file này: `<máy chủ>/huong-dan-agent`
@@ -64,6 +71,74 @@ Cách tính mức sát:
 
 Gợi ý khi dùng: ưu tiên Nhóm 1 rồi đến Nhóm 2, chọn biến thể có mức sát 4–5. "Cần xem xét" chỉ dùng khi đã kiểm tra là đúng sản phẩm. Không dùng mục "Loại".
 
+## Xử lý keyword ngay trên bộ
+
+Agent làm được trực tiếp trên bộ keyword đúng những việc người dùng làm trên trang web. Kết quả lưu vào bộ đó: mọi người mở link `/kw-list/...` đều thấy, `final.md` và `final.xlsx` cũng đổi theo.
+
+**Chỉ làm khi người dùng yêu cầu rõ.** Dữ liệu này dùng chung cả nhóm. Trước khi ghi, nói lại cho người dùng biết sẽ xoá hoặc loại những gì, và có bao nhiêu keyword.
+
+Các lệnh dùng `POST` với body JSON, nên WebFetch không gọi được. Dùng `curl` trong Bash, hoặc `fetch` trong trình duyệt. `<bộ>` là tên bộ (lấy từ link `/kw-list/<bộ>`) hoặc Mã sản phẩm.
+
+### 1. Xoá keyword khỏi bộ
+
+Dùng khi keyword sai sản phẩm, có tên thương hiệu, hoặc là rác.
+
+```bash
+curl -s -X POST "<máy chủ>/api/lists/<bộ>/xoa" \
+  -H "Content-Type: application/json" \
+  -d '{"keywords": ["hiking ornament disney", "rei hiking gifts"]}'
+```
+
+- Keyword phải ghi **đúng như trong bộ**. Không phân biệt hoa thường.
+- Kết quả trả về: `{"ok": true, "da_xoa": [toàn bộ keyword đang bị xoá], "doi": số keyword vừa thêm vào danh sách xoá}`.
+- Đây là xoá mềm: keyword không mất mà chỉ bị ẩn khỏi bộ và mọi file xuất, nên khôi phục được.
+
+### 2. Khôi phục keyword đã xoá
+
+```bash
+# khôi phục vài keyword
+curl -s -X POST "<máy chủ>/api/lists/<bộ>/xoa" -H "Content-Type: application/json" \
+  -d '{"keywords": ["rei hiking gifts"], "khoi_phuc": true}'
+# khôi phục tất cả
+curl -s -X POST "<máy chủ>/api/lists/<bộ>/xoa" -H "Content-Type: application/json" \
+  -d '{"khoi_phuc": "het"}'
+```
+
+Muốn xem bộ đang xoá những keyword nào: `GET <máy chủ>/api/lists/<bộ>?rows=0`, xem trường `da_xoa`.
+
+### 3. Gắn nhãn cho biến thể (loại biến thể không hợp sản phẩm)
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "<máy chủ>/api/lists/<bộ>/bien-the/nhan" \
+  -H "Content-Type: application/json" -d '{"ten": "disney", "nhan": "Không hợp"}'
+```
+
+| `nhan` | Tác dụng |
+|---|---|
+| `"Không hợp"` | Biến thể chuyển sang mục **Loại**, không còn nằm trong Nhóm 1/2/3. Giống bấm nút "Loại" trên web. |
+| `"Sát"` / `"Xa"` | Chỉ ghi chú, hiện ở cột Nhãn tay. Thứ tự không đổi. |
+| `""` (rỗng) | Bỏ nhãn: biến thể bị Loại sẽ trở lại nhóm cũ. Giống nút "Đưa lại". |
+
+- `ten` là **tên biến thể** đúng như cột Biến thể trong `final.md`, không phải keyword.
+- Nhãn gắn theo tên. Nếu cùng một tên xuất hiện ở nhiều loại (ví dụ `hiking` có cả ở Product lẫn Gift) thì nhãn áp cho tất cả.
+- Lệnh trả về toàn bộ kết quả chia biến thể, rất lớn. Thêm `-o /dev/null -w "%{http_code}"` như trên để chỉ lấy mã 200, rồi đọc lại `final.md?kw=0` để kiểm tra.
+
+### Trình tự nên làm
+
+1. Đọc `final.md?kw=0` để thấy toàn bộ biến thể và mức sát.
+2. Đọc keyword của các loại hoặc biến thể cần soát, ví dụ `final.md?loai=product&phu=0`.
+3. Lập danh sách biến thể cần loại và keyword cần xoá, có lý do, rồi đưa người dùng duyệt.
+4. Được duyệt thì gọi các lệnh ở trên. Nhãn trước, xoá keyword sau.
+5. Đọc lại `final.md?kw=0` và báo người dùng kết quả: bao nhiêu biến thể đã loại, bao nhiêu keyword đã xoá.
+
+### Những việc agent không làm
+
+- Tạo bộ, lấy lại Cerebro, huỷ job (`/fetch`, `/cancel`, `/upload`, `/api/lists`): tốn lượt H10 dùng chung.
+- Ghi link vào Lark (`/lark-link`).
+- Dừng tool, bỏ bộ khỏi hàng đợi.
+
+Các việc này để người dùng tự làm trên web.
+
 ## Các đường khác
 
 | Cần gì | Đường |
@@ -94,4 +169,4 @@ Agent nên đọc bản `.md`. File `.xlsx` để người dùng tải.
   ```
   Hoặc dùng `curl -s <url>` trong Bash.
 - **Ứng dụng Claude (claude.ai / desktop)**: tính năng đọc web có thể chỉ nhận link người dùng dán vào chat. Hãy dán thẳng link `.../final.md` vào chat thay vì link `/kw-list/...`.
-- **Chỉ đọc.** Các đường POST (tạo bộ, xếp Cerebro, xoá keyword, ghi Lark) làm thay đổi dữ liệu chung và tốn lượt H10. Không gọi khi người dùng chưa yêu cầu rõ.
+- Đọc thì tự do. Còn ghi (xoá keyword, gắn nhãn) chỉ làm khi người dùng yêu cầu, theo mục "Xử lý keyword ngay trên bộ".
