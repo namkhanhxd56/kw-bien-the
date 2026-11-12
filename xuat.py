@@ -64,7 +64,7 @@ def _thong_tin(L: dict, F: dict) -> list[tuple[str, str]]:
             ("Đã quét", f"{L.get('so_xong', 0)}/{len(L.get('trang_thai_asin') or [])} ASIN"
                         + ("" if L.get("so_xong", 0) >= len(L.get("trang_thai_asin") or []) else " — CHƯA ĐỦ, kết quả còn thay đổi")),
             ("Keyword sau gộp", f"{s.get('gop', '')} (từ {s.get('goc', '')} dòng gốc, {s.get('trung', '')} dòng trùng)"),
-            ("Xuất lúc", time.strftime("%Y-%m-%d %H:%M"))]
+            ("Xuất lúc", time.strftime("%Y-%m-%d %H:%M", time.gmtime(time.time() + 7 * 3600)) + " (giờ VN)")]
 
 
 GIAI_THICH = [
