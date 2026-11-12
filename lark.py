@@ -215,9 +215,20 @@ def parse_asins(raw: str) -> tuple[list[str], list[str]]:
 
 _cache = {"at": 0.0, "items": []}
 _khoa = threading.Lock()
+CACHE_FILE: Path | None = None   # server đặt: lưu danh sách mã xuống ổ, khởi động lại thì hiện ngay
 
 
 def list_products(refresh: bool = False) -> list[dict]:
+    if not refresh and not _cache["items"] and CACHE_FILE and CACHE_FILE.is_file():
+        # Vừa khởi động lại: dùng bản đã lưu cho nhanh, đọc lại Lark ngầm phía sau
+        try:
+            d = json.loads(CACHE_FILE.read_text("utf-8"))
+            with _khoa:
+                if not _cache["items"]:
+                    _cache.update(at=d["at"], items=d["items"])
+                    threading.Thread(target=_doc_lai_ngam, daemon=True).start()
+        except (OSError, ValueError, KeyError):
+            pass
     with _khoa:
         if _cache["items"] and not refresh:
             return _cache["items"]
@@ -241,7 +252,21 @@ def list_products(refresh: bool = False) -> list[dict]:
                 "co_anh": bool(_text(cell.get(F_ANH))),
             })
         _cache.update(at=time.time(), items=items)
+        if CACHE_FILE:
+            try:
+                tmp = CACHE_FILE.with_suffix(".tmp")
+                tmp.write_text(json.dumps({"at": _cache["at"], "items": items}, ensure_ascii=False), "utf-8")
+                tmp.replace(CACHE_FILE)
+            except OSError:
+                pass
         return items
+
+
+def _doc_lai_ngam() -> None:
+    try:
+        list_products(refresh=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"  lark: đọc lại danh sách mã ngầm lỗi: {e}", flush=True)
 
 
 def find_product(ma: str) -> dict | None:

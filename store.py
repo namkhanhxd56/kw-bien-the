@@ -39,7 +39,13 @@ class Store:
         (root / "lists").mkdir(parents=True, exist_ok=True)
         (root / "analysis").mkdir(parents=True, exist_ok=True)
         self.agents: dict[str, dict] = {}   # máy chạy extension: id → thông tin lần báo gần nhất
-        self._tt_cache: dict[Path, tuple[float, dict | None]] = {}   # tóm tắt file ASIN theo mtime
+        # Tóm tắt file ASIN (số kw, kỳ, nguồn…) theo mtime. Lưu xuống ổ để khởi động lại (mỗi lần deploy) không phải
+        # đọc lại ~5.000 file ASIN chỉ để đếm keyword — việc đó từng làm danh sách mã treo vài phút.
+        self._tt_file = root / "tom_tat_asin.json"
+        self._tt_cache: dict[Path, tuple[float, dict | None]] = {
+            root / k: (v[0], v[1]) for k, v in self._read(self._tt_file, {}).items()}
+        self._tt_moi = False
+        self._tt_luu_luc = 0.0
 
     # ------------------------------------------------------------ tiện ích file
     def _read(self, p: Path, default):
@@ -172,7 +178,18 @@ class Store:
         if d is not None:
             d = {**{k: v for k, v in d.items() if k != "rows"}, "so_kw": len(d.get("rows") or [])}
         self._tt_cache[p] = (mt, d)
+        self._tt_moi = True
         return d
+
+    def luu_tom_tat(self, toi_thieu_giay: float = 60) -> None:
+        """Ghi bộ nhớ tóm tắt ASIN xuống ổ khi có mục mới (tối đa mỗi phút một lần)."""
+        if not self._tt_moi or time.time() - self._tt_luu_luc < toi_thieu_giay:
+            return
+        self._tt_moi, self._tt_luu_luc = False, time.time()
+        try:
+            self._write(self._tt_file, {str(p.relative_to(self.root)): [mt, d] for p, (mt, d) in list(self._tt_cache.items())})
+        except (OSError, ValueError):
+            self._tt_moi = True
 
     def all_asin_data(self, slug: str, asins: list[str]) -> dict[str, dict]:
         out = {}

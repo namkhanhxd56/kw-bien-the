@@ -70,6 +70,7 @@ RANK_MAX = int(os.environ.get("RANK_MAX", "100"))
 MAX_UPLOAD = 30 * 1024 * 1024
 
 store = Store(DATA)
+lark.CACHE_FILE = DATA / "lark_products.json"
 
 
 _cap_cache: dict[str, tuple[int, int]] = {}   # tên file → (dung lượng đã đếm, số dòng)
@@ -268,6 +269,31 @@ def _chia_bien_the(meta: dict) -> dict:
     out = engine.ket_qua_json(res, dg, {"Không hợp"})
     out.update(ok=True, stats=stats, nhan_chon=NHAN, cau_hinh_rieng=ch["rieng"], target_year=ch["target_year"],
                ky={a: data[a].get("period_used") for a in asins})
+    return out
+
+
+_sp = {"luc": 0.0, "body": b""}
+_sp_khoa = threading.Lock()
+
+
+def danh_sach_ma(refresh: bool = False) -> list[dict]:
+    """Danh sách mã trên Lark kèm bộ keyword + trạng thái từng ASIN. Đọc hàng đợi và thư mục ảnh MỘT lần
+    (trước đây lọc cả hàng đợi và quét thư mục ảnh cho từng mã trong ~1.500 mã)."""
+    items = lark.list_products(refresh)
+    bo, theo_bo = store.lists_by_ma(), {}
+    for j in store._jobs():
+        theo_bo.setdefault(j["slug"], []).append(j)
+    try:
+        anh = {f.split(".")[0] for f in os.listdir(DATA / "img")}
+    except FileNotFoundError:
+        anh = set()
+    out = []
+    for p in items:
+        meta = bo.get(p["ma"])
+        out.append({**p, "bo": tom_tat_bo(meta, jobs=theo_bo.get(meta["slug"], [])) if meta else None,
+                    "da_phan_tich": bool(store.get_analysis(p["ma"]).get("ket_luan")),
+                    "anh_cache": p["ma"] in anh})
+    store.luu_tom_tat()
     return out
 
 
@@ -488,15 +514,14 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _products(self, refresh: bool):
-        items = lark.list_products(refresh)
-        bo, jobs = store.lists_by_ma(), store._jobs()
-        out = []
-        for p in items:
-            meta = bo.get(p["ma"])
-            out.append({**p, "bo": tom_tat_bo(meta, jobs=jobs) if meta else None,
-                        "da_phan_tich": bool(store.get_analysis(p["ma"]).get("ket_luan")),
-                        "anh_cache": lark.image_path(p["ma"], DATA, download=False) is not None})
-        self._json({"ok": True, "products": out})
+        # Trang chính gọi mỗi phút ở mọi tab đang mở: dựng một lần, ai gọi trong 20 giây sau dùng lại bản đó;
+        # đang dựng thì người gọi sau đợi chung, không dựng chồng.
+        with _sp_khoa:
+            if refresh or time.time() - _sp["luc"] > 20:
+                _sp.update(body=json.dumps({"ok": True, "products": danh_sach_ma(refresh)}, ensure_ascii=False).encode(),
+                           luc=time.time())
+            body = _sp["body"]
+        self._send(200, body, "application/json; charset=utf-8")
 
     def _image(self, ma: str, download: bool):
         p = lark.image_path(ma, DATA, download=download)
