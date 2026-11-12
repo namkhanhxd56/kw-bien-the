@@ -70,12 +70,25 @@ MAX_UPLOAD = 30 * 1024 * 1024
 store = Store(DATA)
 
 
+_cap_cache: dict[str, tuple[int, int]] = {}   # tên file → (dung lượng đã đếm, số dòng)
+
+
 def tom_tat_capture() -> list[dict]:
-    """Các ngày có request do chế độ "Ghi lại" gửi về: tên file, số dòng, dung lượng."""
+    """Các ngày có request do chế độ "Ghi lại" gửi về: tên file, số dòng, dung lượng.
+    /api/status gọi vài giây một lần nên không đọc lại cả file: nhớ số dòng theo dung lượng, file chỉ ghi nối thêm
+    nên chỉ đếm phần mới."""
     out = []
     for f in sorted((DATA / "capture").glob("*.jsonl")):
-        with open(f, "rb") as fh:
-            out.append({"file": f.name, "so": sum(1 for _ in fh), "kb": round(f.stat().st_size / 1024)})
+        size = f.stat().st_size
+        da, so = _cap_cache.get(f.name, (0, 0))
+        if size != da:
+            if size < da:
+                da, so = 0, 0
+            with open(f, "rb") as fh:
+                fh.seek(da)
+                so += sum(1 for _ in fh)
+            _cap_cache[f.name] = (size, so)
+        out.append({"file": f.name, "so": so, "kb": round(size / 1024)})
     return out
 
 
@@ -132,7 +145,18 @@ def trang_thai_asin(slug: str, asins: list[str], jobs: list[dict] | None = None)
 
 def bo_theo(slug_hoac_ma: str) -> dict | None:
     """Bộ keyword theo tên bộ, hoặc theo Mã sản phẩm (bộ mới nhất của mã) — để agent chỉ cần biết Mã."""
-    return store.get_list(slug_hoac_ma) or store.list_by_ma(slug_hoac_ma.strip().upper())
+    meta = store.get_list(slug_hoac_ma)
+    if meta:
+        return meta
+    ma = slug_hoac_ma.strip().upper()
+    if time.time() - _ma_slug["luc"] > 600 or ma not in _ma_slug["bang"]:
+        # Không giữ khoá của store: quét ~1.400 meta.json lâu, giữ khoá thì chặn cả hàng đợi job
+        _ma_slug.update(luc=time.time(), bang={m: b["slug"] for m, b in store.lists_by_ma().items()})
+    slug = _ma_slug["bang"].get(ma)
+    return store.get_list(slug) if slug else None
+
+
+_ma_slug = {"luc": 0.0, "bang": {}}   # Mã → tên bộ mới nhất, nhớ 10 phút để tra theo Mã khỏi quét lại
 
 
 def da_xoa(slug: str) -> list[str]:
