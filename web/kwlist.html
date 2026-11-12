@@ -13,7 +13,9 @@
   <div class="brand"><a href="/" style="color:inherit"><b>KW Biến Thể</b></a><span id="crumb">Bộ keyword</span></div>
 </header>
 <main class="main"><div class="main-inner" id="root">
-  <div class="card section"><div class="section-body"><div class="skeleton" style="height:22px;width:40%"></div><div class="skeleton" style="height:14px;width:60%;margin-top:10px"></div></div></div>
+  <div class="card section"><div class="section-body"><div class="skeleton" style="height:22px;width:40%"></div><div class="skeleton" style="height:14px;width:60%;margin-top:10px"></div>
+    <p class="small muted" style="margin:12px 0 0">Trang này dựng bằng JavaScript. Agent / công cụ đọc web: đổi <code>/kw-list/&lt;tên bộ&gt;</code> thành <code>/api/lists/&lt;tên bộ&gt;/final.md</code> để đọc bộ keyword final dạng chữ, hoặc <code>/api/lists/&lt;tên bộ&gt;/final.xlsx</code> để tải Excel. Hướng dẫn đầy đủ: <a href="/huong-dan-agent">/huong-dan-agent</a>.</p>
+  </div></div>
 </div></main>
 <div class="chon-bar" id="chon-bar" hidden>
   <span>Đã chọn <b id="chon-so">0</b> keyword</span>
@@ -145,7 +147,8 @@ function render() {
         <h1>${esc(L.ten)}</h1>
         <div class="sub small">${asins.length} ASIN đối thủ · ${fmt(s.goc)} dòng gốc → <b>${fmt(s.gop)}</b> keyword sau gộp (${fmt(s.trung)} dòng trùng)</div>
       </div>
-      <a class="btn" href="/api/lists/${encodeURIComponent(slug)}/export.csv">Tải CSV</a>
+      <a class="btn primary" href="/api/lists/${encodeURIComponent(slug)}/final.xlsx" title="Bộ keyword final: Tổng hợp, mỗi loại một sheet (Product · Function · Gift · Personalized · Occasion), cột Nhóm và Mức sát">Tải Excel final</a>
+      <a class="btn" href="/api/lists/${encodeURIComponent(slug)}/export.csv" title="Keyword thô sau gộp, chưa chia biến thể">Tải CSV thô</a>
     </div>
 
     ${L.ky_tron ? '<div class="note warn" style="margin-bottom:12px">Các ASIN lấy ở kỳ khác nhau (12/2025 và kỳ hiện tại). Search volume giữa hai kỳ không cùng mùa, xem cột Kỳ trước khi so.</div>' : ""}

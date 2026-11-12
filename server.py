@@ -44,6 +44,7 @@ import auth
 import cerebro
 import engine
 import lark
+import xuat
 from store import KY_CHINH, KY_HIEN_TAI, Store, thu_tu_chay
 
 GOC = Path(__file__).resolve().parent
@@ -323,6 +324,11 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.fullmatch(r"/api/lists/([^/]+)/export\.csv", path)
                 if m:
                     return self._export(m.group(1))
+                m = re.fullmatch(r"/api/lists/([^/]+)/final\.(xlsx|md)", path)
+                if m:
+                    return self._final(m.group(1), m.group(2), q)
+                if path in ("/huong-dan-agent", "/huong-dan-agent.md"):
+                    return self._send(200, (GOC / "HUONG-DAN-AGENT.md").read_bytes(), "text/markdown; charset=utf-8")
                 m = re.fullmatch(r"/api/lists/([^/]+)/bien-the", path)
                 if m:
                     return self._bien_the(m.group(1))
@@ -502,6 +508,21 @@ class Handler(BaseHTTPRequestHandler):
         body = ("﻿" + buf.getvalue()).encode("utf-8")
         self._send(200, body, "text/csv; charset=utf-8",
                    {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(slug)}.csv"})
+
+    def _final(self, slug: str, dang: str, q: dict):
+        """Bộ keyword final đã chia biến thể: .xlsx (mỗi loại một sheet) hoặc .md (cho agent đọc).
+        Nhận cả tên bộ lẫn Mã sản phẩm (/api/lists/BSV051/final.md) để agent khỏi phải tra tên bộ."""
+        meta = store.get_list(slug) or store.lists_by_ma().get(slug.strip().upper())
+        if not meta:
+            return self._err(404, "Chưa có bộ keyword này")
+        L, BT = tom_tat_bo(meta, kem_dong=True), tinh_bien_the(meta)
+        if dang == "xlsx":
+            return self._send(200, xuat.xlsx_bytes(L, BT),
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(meta['slug'])}-final.xlsx"})
+        loai = {x.strip().lower() for x in (q.get("loai") or [""])[0].split(",") if x.strip()}
+        md = xuat.markdown(L, BT, kw=q.get("kw") != ["0"], loai=loai or None, bo_phu=q.get("phu") == ["0"])
+        self._send(200, md.encode("utf-8"), "text/markdown; charset=utf-8")
 
     def _bien_the(self, slug: str):
         meta = store.get_list(slug)
