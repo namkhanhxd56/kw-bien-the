@@ -340,6 +340,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._bo_hang_doi()
                 if path == "/api/hang-doi/uu-tien":
                     return self._uu_tien()
+                if path == "/api/dung-lai":
+                    return self._json({"ok": True, **store.dung_lai_tat_ca()})
                 if path == "/api/lists":
                     return self._create_list()
                 m = re.fullmatch(r"/api/analysis/([^/]+)", path)
@@ -722,6 +724,7 @@ class Handler(BaseHTTPRequestHandler):
                              nguon="h10", canh_bao=canh_bao, fetched_at=luc)
         store.update_job(job_id, status="done" if rows else "empty", rows=len(rows), finished_at=luc)
         chung = store.chia_ket_qua(j["asin"], job_id, rows, period_used, j["slug"], canh_bao, luc)
+        chung += store.dien_bo_thieu(j["asin"], rows, period_used, j["slug"], canh_bao, luc)
         self._json({"ok": True, "so_kw": len(rows), "dien_chung": len(chung)})
 
 

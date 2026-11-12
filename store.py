@@ -227,6 +227,43 @@ class Store:
                 self._save_jobs(jobs)
             return xong
 
+    def dien_bo_thieu(self, asin: str, rows, period_used, nguon_slug, canh_bao, fetched_at) -> list[str]:
+        """Bộ có ASIN này mà chưa có dữ liệu và không có job chờ (chưa xếp, đã bỏ khỏi hàng đợi, lỗi)
+        → chép luôn, để mã trùng ASIN không phải đợi ai bấm lấy keyword."""
+        dang = {j["slug"] for j in self._jobs() if j["asin"] == asin and j["status"] in ("queued", "running")}
+        xong = []
+        for f in (self.root / "lists").glob("*/meta.json"):
+            m = self._read(f, None)
+            if (not m or asin not in (m.get("asins") or []) or f.parent.name in dang
+                    or (f.parent / f"{asin}.json").exists()):
+                continue
+            self.save_asin_data(f.parent.name, asin, rows=rows, period_used=period_used, nguon="h10",
+                                canh_bao=canh_bao, fetched_at=fetched_at, dung_lai_tu=nguon_slug)
+            xong.append(f.parent.name)
+        return xong
+
+    def dung_lai_tat_ca(self) -> dict:
+        """Quét mọi bộ: ASIN chưa có dữ liệu, không có job chờ, mà bộ khác đã lấy → chép sang (0 lượt)."""
+        dang = {(j["slug"], j["asin"]) for j in self._jobs() if j["status"] in ("queued", "running")}
+        can: dict[str, list[str]] = {}
+        for f in (self.root / "lists").glob("*/meta.json"):
+            m = self._read(f, None)
+            for a in (m or {}).get("asins") or []:
+                if (f.parent.name, a) not in dang and not (f.parent / f"{a}.json").exists():
+                    can.setdefault(a, []).append(f.parent.name)
+        so_o, so_bo = 0, set()
+        for a, slugs in can.items():
+            tim = self.tim_du_lieu_asin(a)
+            if not tim:
+                continue
+            nguon_slug, d = tim
+            for slug in slugs:
+                self.save_asin_data(slug, a, rows=d["rows"], period_used=d["period_used"], nguon="h10",
+                                    canh_bao=d.get("canh_bao"), fetched_at=d["fetched_at"], dung_lai_tu=nguon_slug)
+                so_o += 1
+                so_bo.add(slug)
+        return {"so_o": so_o, "so_bo": len(so_bo), "so_asin_chua_co": sum(1 for a in can if not self.tim_du_lieu_asin(a))}
+
     def doi_ky_cho(self, asin: str, tru_job: str, period: str) -> None:
         """Kỳ 12/2025 của ASIN trống: các job khác cùng ASIN đang chờ kỳ đó chuyển sang kỳ mới luôn."""
         with khoa:
