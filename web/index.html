@@ -30,6 +30,7 @@
         <select class="input" id="f-tt" aria-label="Lọc theo trạng thái">
           <option value="">Mọi trạng thái</option>
           <option value="chua">Chưa tạo bộ</option>
+          <option value="du3-chua" title="Có từ 3 ASIN đối thủ trở lên nhưng chưa tạo bộ, hoặc đã tạo mà chưa ASIN nào lấy / đang chờ lấy keyword">Đủ ≥ 3 ASIN, chưa lấy keyword</option>
           <option value="dang">Chờ / đang lấy keyword</option>
           <option value="thieu">Bộ còn thiếu ASIN</option>
           <option value="du">Đủ keyword</option>
@@ -176,6 +177,7 @@ function trangThai(p) {
 }
 const LOC = {
   "": () => true, chua: p => !p.bo, dang: p => trangThai(p) === "dang", thieu: p => trangThai(p) === "thieu",
+  "du3-chua": p => p.asin_doi_thu.length >= 3 && (!p.bo || !p.bo.trang_thai_asin.some(a => ["xong", "cho", "dang_lay"].includes(a.trang_thai))),
   du: p => trangThai(p) === "du", du3: p => p.asin_doi_thu.length >= 3, it: p => p.asin_doi_thu.length < 3, anh: p => p.da_phan_tich, "chua-anh": p => !p.da_phan_tich,
 };
 const XEP = {
