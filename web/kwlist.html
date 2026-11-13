@@ -77,10 +77,31 @@ async function load() {
   }
 }
 
-async function taiLai() {   // sau khi xoá / khôi phục: đọc lại bộ + biến thể, vẽ lại, giữ tab đang xem
+// Vẽ lại phần tab mà giữ nguyên khối biến thể đang mở và vị trí cuộn (không có cảm giác tải lại trang)
+function veLaiGiu() {
+  const mo = new Set([...document.querySelectorAll("#tab-body details[data-k]")].filter(d => d.open).map(d => d.dataset.k));
+  const y = window.scrollY;
+  renderTab();
+  document.querySelectorAll("#tab-body details[data-k]").forEach(d => { if (mo.has(d.dataset.k)) d.open = true; });
+  window.scrollTo(0, y);
+}
+
+const tomTat = () => `${L.trang_thai_asin.length} ASIN đối thủ · ${fmt(L.stats.goc)} dòng gốc → <b>${fmt(L.stats.gop)}</b> keyword sau gộp (${fmt(L.stats.trung)} dòng trùng)`;
+
+async function taiLai() {   // sau khi xoá / khôi phục: đọc lại bộ + biến thể, chỉ vẽ lại phần tab
   const r = await fetch("/api/lists/" + encodeURIComponent(slug));
   const d = await r.json();
-  if (r.ok && d.ok) { L = d.list; await loadBT(); render(); }
+  if (!r.ok || !d.ok) return;
+  L = d.list; await loadBT();
+  if (!$("#tab-body")) return render();
+  $("#tom-tat").innerHTML = tomTat();
+  veLaiGiu();
+}
+
+// Gỡ ngay các dòng vừa xoá khỏi bảng đang hiện, không đợi server chia lại biến thể
+function goDong(kws) {
+  const bo = new Set(kws);
+  document.querySelectorAll("#tab-body input[data-kw]").forEach(c => { if (bo.has(c.dataset.kw)) c.closest("tr")?.remove(); });
 }
 
 async function xoaKw(kws, khoiPhuc) {
@@ -89,7 +110,7 @@ async function xoaKw(kws, khoiPhuc) {
       body: JSON.stringify({ keywords: kws, khoi_phuc: khoiPhuc || false }) });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || "Không lưu được");
-    if (!khoiPhuc) kws.forEach(k => CHON.delete(k));
+    if (!khoiPhuc) { kws.forEach(k => CHON.delete(k)); goDong(kws); capNhatChon(); }
     await taiLai();
     if (khoiPhuc) toast(`Đã khôi phục ${d.doi} keyword`);
     else toast(`Đã xoá ${d.doi} keyword khỏi bộ`, false, { ten: "Hoàn tác", lam: () => xoaKw(kws, true) });
@@ -135,8 +156,8 @@ async function datNhan(ten, nhan) {
     const r = await fetch(`/api/lists/${encodeURIComponent(slug)}/bien-the/nhan`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ten, nhan }) });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || "Không lưu được nhãn");
-    BT = d; renderTab(); toast(`Đã đặt "${ten}": ${nhan || "bỏ nhãn"}`);
-  } catch (e) { toast(e.message, true); renderTab(); }
+    BT = d; veLaiGiu(); toast(`Đã đặt "${ten}": ${nhan || "bỏ nhãn"}`);
+  } catch (e) { toast(e.message, true); veLaiGiu(); }
 }
 
 // ---------------------------------------------------------------- khung trang
@@ -147,7 +168,7 @@ function render() {
       <img class="thumb" style="width:64px;height:64px" src="/api/products/${encodeURIComponent(L.ma)}/image?cached=1" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'thumb',style:'width:64px;height:64px',textContent:'${esc(L.ma.slice(0,3))}'}))">
       <div style="flex:1;min-width:0">
         <h1>${esc(L.ten)}</h1>
-        <div class="sub small">${asins.length} ASIN đối thủ · ${fmt(s.goc)} dòng gốc → <b>${fmt(s.gop)}</b> keyword sau gộp (${fmt(s.trung)} dòng trùng)</div>
+        <div class="sub small" id="tom-tat">${tomTat()}</div>
       </div>
       <a class="btn primary" href="/api/lists/${encodeURIComponent(slug)}/final.xlsx" title="Bộ keyword final: Tổng hợp, mỗi loại một sheet (Product · Function · Gift · Personalized · Occasion), cột Nhóm và Mức sát">Tải Excel final</a>
       <a class="btn" href="/api/lists/${encodeURIComponent(slug)}/export.csv" title="Keyword thô sau gộp, chưa chia biến thể">Tải CSV thô</a>
@@ -259,7 +280,7 @@ function khoi({ ten, tag, nhan, kw, cls, chinh = true, soAsin, rank, nhom, v }) 
   const i = KHOI.push({ ten, kw: kw.map(r => r.keyword), chinh }) - 1;
   const sv = kw.reduce((n, r) => n + (r.sv || 0), 0);
   const duoi = [soAsin != null ? `${soAsin}/${BT.NA} ASIN` + (nhom ? ` (Nhóm ${nhom})` : "") : "", rank != null ? `rank tốt nhất ${rank}` : ""].filter(Boolean).join(" - ");
-  return `<details class="vb ${cls || ""}" ${moHet ? "open" : ""}>
+  return `<details class="vb ${cls || ""}" data-k="${esc((cls || "") + "|" + (tag || "") + "|" + ten)}" ${moHet ? "open" : ""}>
     <summary>
       <span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}<span class="sl">(SV: ${fmt(sv)}; ${kw.length} keyword)</span></span>
       <span class="vm">${v ? song(v) : ""}${nhan !== undefined ? nutLoai(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
@@ -347,7 +368,7 @@ function renderTongHop(el) {
         <td class="num">${fmt((BT.phu?.[sh] || []).reduce((n, p) => n + p.kw.length, 0))} kw</td></tr>`).join("")}
         <tr><td><b>Tổng</b></td>${tong.map(vs => `<td class="num"><b>${o(vs)}</b></td>`).join("")}<td class="num"><b>${fmt(Object.values(BT.phu || {}).flat().reduce((n, p) => n + p.kw.length, 0))} kw</b></td></tr></tbody>
     </table></div>
-    <details class="vb phu" style="margin-bottom:14px"><summary><span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">Cách tính mức sát</span></span></summary>
+    <details class="vb phu" data-k="cach-tinh" style="margin-bottom:14px"><summary><span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">Cách tính mức sát</span></span></summary>
       <div class="table-wrap"><table>
         <thead><tr><th>Số ASIN có biến thể</th><th>Rank tốt nhất ≤ 20</th><th>21–50 (page 1)</th><th>51–75</th><th>76–100</th></tr></thead>
         <tbody>${[[3, "≥ 3 ASIN", [5, 4, 2, 1]], [2, "2 ASIN", [4, 3, 2, 1]], [1, "1 ASIN", [3, 3, 1, 1]]].map(([, l, ds]) => `<tr><td>${l}</td>${ds.map(m => `<td>${song({ sat: m, so_asin: "", rank: "" }).replace(/ title="[^"]*"/, "")}</td>`).join("")}</tr>`).join("")}</tbody>
@@ -395,7 +416,7 @@ function renderTatCa(el) {
       <label class="row small"><input type="checkbox" id="f-orn" ${view.orn ? "checked" : ""}> Chỉ keyword có "ornament"</label>
       <span class="small muted">Mỗi keyword giữ dòng có organic rank tốt nhất; hoà rank thì lấy search volume cao hơn.</span>
     </div>
-    ${(L.da_xoa || []).length ? `<details class="vb phu" style="margin-bottom:10px"><summary><span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">Đã xoá ${L.da_xoa.length} keyword khỏi bộ</span></span>
+    ${(L.da_xoa || []).length ? `<details class="vb phu" data-k="da-xoa" style="margin-bottom:10px"><summary><span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">Đã xoá ${L.da_xoa.length} keyword khỏi bộ</span></span>
       <span class="vm"><button type="button" class="btn sm" id="khoi-phuc-het" data-cap="kw.edit" data-need="edit">Khôi phục tất cả</button></span></summary>
       <div class="small" style="padding:10px 12px;white-space:normal">${L.da_xoa.map(esc).join(" · ")}</div></details>` : ""}
     <div id="tbl"></div>`;
