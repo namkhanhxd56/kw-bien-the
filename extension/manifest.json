@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "KW Biến Thể – Cerebro",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Nhận job từ tool KW Biến Thể, lấy keyword ASIN đối thủ trên Cerebro (Helium 10) bằng phiên đăng nhập của Chrome này rồi gửi về tool.",
   "minimum_chrome_version": "111",
   "background": { "service_worker": "background.js", "type": "module" },

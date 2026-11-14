@@ -1,7 +1,7 @@
 // Nền của extension: hỏi tool KW Biến Thể có job Cerebro không, chạy job trong một tab
 // members.helium10.com chạy ngầm (dùng phiên đăng nhập H10 của Chrome này), gửi kết quả về.
 // Mỗi lần chỉ chạy 1 job, nghỉ giữa các job để không dồn request lên H10.
-import { ADAPTER, laTrangDangNhap } from "./adapter.js";
+import { ADAPTER, laTrangDangNhap, dsTaiKhoan } from "./adapter.js";
 
 const VERSION = chrome.runtime.getManifest().version;
 const MAC_DINH = { server: "http://localhost:8796", token: "", running: true, capture: false, nghi: 10, ten: "" };
@@ -144,6 +144,33 @@ async function tick() {
   }
 }
 
+// ---------------------------------------------------------------- đổi tài khoản H10
+// Một phiên đăng nhập H10 có thể có 2–3 tài khoản (menu avatar → Switch Accounts). Tài khoản chỉ có bản demo
+// Cerebro hoặc hết lượt thì ghi nhớ một thời gian và chuyển sang tài khoản khác, không cần mật khẩu.
+const TK_NHO = { demo: 12 * 3600 * 1000, het_luot: 20 * 3600 * 1000 };
+
+async function tkBiKhoa() {
+  const { tkKhoa = {} } = await chrome.storage.local.get("tkKhoa");
+  const now = Date.now();
+  return Object.fromEntries(Object.entries(tkKhoa).filter(([, v]) => now - v.at < (TK_NHO[v.ly] || 0)));
+}
+
+async function doiTaiKhoan(tabId, ly) {
+  const r = await chayTrongTab(tabId, dsTaiKhoan).catch(e => ({ ok: false, error: String(e.message || e) }));
+  if (!r?.ok) return { ok: false, error: r?.error || "Không đọc được danh sách tài khoản H10" };
+  const khoa = await tkBiKhoa();
+  const cu = r.ds.find(a => a.dangDung);
+  if (cu) khoa[cu.id] = { ly, ten: cu.ten, at: Date.now() };
+  await chrome.storage.local.set({ tkKhoa: khoa });
+  const moi = r.ds.find(a => !a.dangDung && !khoa[a.id]);
+  if (!moi) return { ok: false, error: `${r.ds.length} tài khoản H10 trên Chrome này đều đang bị khoá Cerebro hoặc hết lượt` };
+  await chrome.tabs.update(tabId, { url: moi.href });   // link của chính menu H10: …/dashboard?accountId=<id>
+  await new Promise(ok => setTimeout(ok, 1500));
+  await choTabTai(tabId);
+  await datSt({ tk: { id: moi.id, ten: moi.ten, at: Date.now() } });
+  return { ok: true, cu, moi };
+}
+
 // Mở trang tìm mới của Cerebro trước mỗi job (sau job trước, tab còn ở trang /view/<id>)
 async function veTrangTim(tabId) {
   await chrome.tabs.update(tabId, { url: ADAPTER.cerebroUrl });
@@ -171,7 +198,7 @@ async function chayMotLan(tabId, job) {
 async function chayJob(tabId, job) {
   await datSt({ phase: "running", job: { id: job.id, asin: job.asin, period: job.filters.period, start: Date.now() }, error: null });
   const giuThuc = setInterval(() => chrome.runtime.getPlatformInfo(), 20000);   // giữ service worker sống
-  let kq = null, lan = 0;
+  let kq = null, lan = 0, doi = 0;
   try {
     for (lan = 1; lan <= SO_LAN_CHAY; lan++) {
       try {
@@ -180,7 +207,18 @@ async function chayJob(tabId, job) {
         kq = { ok: false, error: String(e.message || e), log: [] };
       }
       guiNhatKy(job, kq, lan);
-      if (kq.ok || kq.login || kq.het_luot || lan === SO_LAN_CHAY) break;
+      // Tài khoản chỉ có bản demo / hết lượt: chuyển tài khoản H10 rồi chạy lại (không tính vào số lần chạy)
+      if (kq.khoa || kq.het_luot) {
+        const d = doi < 3 ? await doiTaiKhoan(tabId, kq.khoa ? "demo" : "het_luot") : { ok: false, error: "đã đổi tài khoản 3 lần" };
+        if (d.ok) {
+          doi++; lan--;
+          await datSt({ error: `${job.asin}: ${kq.khoa ? "tài khoản bị khoá Cerebro" : "hết lượt"} ở ${d.cu?.ten || "tài khoản cũ"} → chuyển sang ${d.moi.ten}` });
+          continue;
+        }
+        kq = { ...kq, het_luot: true, error: `${kq.error} · ${d.error}` };
+        break;
+      }
+      if (kq.ok || kq.login || lan === SO_LAN_CHAY) break;
       // Lỗi khác: đóng tab, mở tab mới rồi chạy lại một lần
       await datSt({ job: { id: job.id, asin: job.asin, period: job.filters.period, start: Date.now(), chay_lai: true },
                     error: `${job.asin}: ${kq.error} → đóng tab, chạy lại 1 lần` });
@@ -194,8 +232,14 @@ async function chayJob(tabId, job) {
                     error: "H10 đã đăng xuất: dừng nhận job, đăng nhập lại Helium 10 để chạy tiếp" });
       return { dung: true };
     }
+    if (!kq.ok && kq.het_luot) {
+      // Hết tài khoản dùng được: trả job về hàng (máy khác lấy, không tính lượt), tắt "Nhận job" ở máy này
+      await chrome.storage.local.set({ running: false });
+      await api(`/api/agent/jobs/${job.id}/release`, { method: "POST", body: { error: kq.error } }).catch(() => {});
+      await datSt({ phase: "limit", job: null, error: `${job.asin}: ${kq.error} → trả job về hàng, tắt nhận job` });
+      return { dung: true };
+    }
     if (!kq.ok) {
-      if (kq.het_luot) await chrome.storage.local.set({ running: false });
       const msg = kq.het_luot ? `Hết lượt Cerebro: ${kq.error}` : `${kq.error} (đã chạy ${lan} lần)`;
       await api(`/api/agent/jobs/${job.id}/fail`, { method: "POST", body: { error: msg } }).catch(() => {});
       await datSt({ phase: kq.het_luot ? "limit" : "idle", job: null, error: `${job.asin}: ${msg}`,
@@ -254,7 +298,9 @@ chrome.runtime.onMessage.addListener((m, sender, tra) => {
     return true;
   }
   if (m?.type === "save") {
-    chrome.storage.local.set(m.cfg).then(() => { tick(); tra({ ok: true }); });
+    // Bật lại "Nhận job" bằng tay: quên các tài khoản đã đánh dấu khoá / hết lượt để thử lại từ đầu
+    const xoaKhoa = m.cfg.running === true ? chrome.storage.local.remove("tkKhoa") : Promise.resolve();
+    xoaKhoa.then(() => chrome.storage.local.set(m.cfg)).then(() => { tick(); tra({ ok: true }); });
     return true;
   }
   if (m?.type === "tick") {

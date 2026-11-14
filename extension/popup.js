@@ -2,7 +2,7 @@ const $ = s => document.querySelector(s);
 const KY = { "2025-12": "12/2025", current: "kỳ hiện tại" };
 const PHASE = {
   idle: ["Đang chờ job", "on"], running: ["Đang lấy", "on"], paused: ["Tạm dừng", "warn"],
-  no_adapter: ["Chưa nhận job (thiếu bộ lấy)", "warn"], limit: ["Hết lượt H10 hôm nay", "warn"], error: ["Lỗi", "off"],
+  no_adapter: ["Chưa nhận job (thiếu bộ lấy)", "warn"], limit: ["Hết tài khoản H10 dùng được", "warn"], error: ["Lỗi", "off"],
 };
 let daDienForm = false;
 
@@ -19,7 +19,8 @@ async function ve() {
 
   dat("tool", { ok: "Đã kết nối", loi: "Không kết nối được", token: "Sai agent token" }[s.tool] || "Chưa thử",
       { ok: "on", loi: "off", token: "off" }[s.tool] || "");
-  dat("h10", { ok: "Đã đăng nhập", logged_out: "Chưa đăng nhập", unknown: "Chưa rõ (kiểm tra khi có job)" }[s.h10] || s.h10,
+  dat("h10", ({ ok: "Đã đăng nhập", logged_out: "Chưa đăng nhập", unknown: "Chưa rõ (kiểm tra khi có job)" }[s.h10] || s.h10)
+      + (s.tk && s.h10 === "ok" ? ` · đã chuyển sang ${s.tk.ten}` : ""),
       { ok: "on", logged_out: "off" }[s.h10] || "");
   dat("adapter", a.ready ? `Sẵn sàng (${a.version})` : "Chưa có, cần soi Cerebro 1 lượt", a.ready ? "on" : "warn");
 

@@ -13,13 +13,15 @@
 //
 // Hợp đồng trả về:
 //   { ok: true, period_used: "2025-12" | "current", rows: [{ keyword, search_volume, search_volume_trend, organic_rank }] }
-//   { ok: false, error, login?: true, het_luot?: true, log: [...], debug: "..." }
+//   { ok: false, error, login?: true, het_luot?: true, khoa?: true, log: [...], debug: "..." }
+// khoa: tài khoản H10 đang chọn chỉ có bản demo Cerebro (ô ASIN xám, bấm vào đòi Upgrade Now).
+// khoa / het_luot: nền đổi sang tài khoản khác qua menu avatar → Switch Accounts (hàm dsTaiKhoan) rồi chạy lại.
 // rows rỗng ở kỳ 2025-12 là bình thường (sản phẩm mới): server tự xếp lại job với kỳ hiện tại, lượt đó
 // không chọn Time Period và không lọc SV/organic rank.
 
 export const ADAPTER = {
   ready: true,
-  version: "ui-2026-11-09",
+  version: "ui-2026-11-14",
   cerebroUrl: "https://members.helium10.com/cerebro-new",
 
   // Viết dạng `function` (không viết `async run() {}`): Chrome tiêm hàm bằng mã nguồn của nó, mà mã nguồn
@@ -144,8 +146,18 @@ export const ADAPTER = {
     try {
       if (!window.__kwbtNet) return { ok: false, error: "Chưa gắn được sổ dữ liệu (cần extension 0.1.2 và tải lại tab Cerebro)", log: LOG };
 
-      // 1. Nhập ASIN
-      const o = await cho(() => q('input[placeholder^="Enter a keyword"]'), 40000, "ô nhập ASIN");
+      // 1. Nhập ASIN. Tài khoản chỉ có bản demo: băng "You are viewing a demo of Cerebro", ô ASIN xám với chữ
+      // "… available for Platinum and above", bấm vào đòi Upgrade Now → báo khoa để nền chuyển tài khoản.
+      const DEMO = /viewing a demo of Cerebro|available for Platinum and above/i;
+      const vao = await cho(() => {
+        const i = q('input[placeholder^="Enter a keyword"]');
+        const demo = DEMO.test(document.body?.innerText || "");
+        if (i && !i.disabled && !demo) return { o: i };
+        if (demo || (i && i.disabled)) return { khoa: true };
+        return null;
+      }, 40000, "ô nhập ASIN");
+      if (vao.khoa) return { ok: false, khoa: true, error: "Tài khoản H10 đang chọn chỉ có bản demo Cerebro (ô ASIN bị khoá, đòi Upgrade)", log: LOG };
+      const o = vao.o;
       await nghi();
       bam(o);
       go(o, asin);
@@ -292,4 +304,37 @@ export const ADAPTER = {
 // Kiểm tra trang đang mở có phải trang đăng nhập H10 không. Tiêm vào tab, phải tự đủ.
 export function laTrangDangNhap() {
   return /\/(login|signin|sign-in)/i.test(location.pathname) || !!document.querySelector('input[type="password"]');
+}
+
+// Danh sách tài khoản H10 của phiên đăng nhập này: menu avatar → Switch Accounts. Tiêm vào tab, phải tự đủ.
+// Chỉ đọc rồi bấm Cancel, không chọn: nền tự mở link tài khoản mới (trang chuyển đi thì kết quả tiêm bị mất).
+// Giao diện ngày 14/11/2026: [data-testid=header-user-btn] → [data-testid=header-user-switch-accounts-btn]
+// → a[data-testid=header-user-account-<id>] href …/dashboard?accountId=<id>, tài khoản đang dùng có radio tick.
+export async function dsTaiKhoan() {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const thay = el => !!el && el.getClientRects().length > 0;
+  const q = sel => [...document.querySelectorAll(sel)].find(thay);
+  async function cho(fn, ms) {
+    const het = Date.now() + ms;
+    while (Date.now() < het) { const v = fn(); if (v) return v; await sleep(300); }
+    return null;
+  }
+  const SW = '[data-testid="header-user-switch-accounts-btn"]';
+  const nut = await cho(() => q('[data-testid="header-user-btn"]'), 20000);
+  if (!nut) return { ok: false, error: "Không thấy nút avatar H10 để đổi tài khoản" };
+  if (!q(SW)) nut.click();
+  const sw = await cho(() => q(SW), 6000);
+  if (!sw) return { ok: false, error: "Không thấy nút Switch Accounts trong menu H10" };
+  sw.click();
+  const as = await cho(() => { const a = [...document.querySelectorAll('a[data-testid^="header-user-account-"]')].filter(thay); return a.length && a; }, 8000);
+  if (!as) return { ok: false, error: "Không mở được danh sách tài khoản H10" };
+  const ds = as.map(a => {
+    const dong = (a.innerText || "").split("\n").map(x => x.trim()).filter(Boolean);
+    return { id: a.dataset.testid.replace("header-user-account-", ""), ten: dong[1] || dong[0] || "", href: a.href,
+             dangDung: !!a.querySelector('input[type="radio"]')?.checked };
+  });
+  q(SW)?.click();   // nút Switch Accounts thành Cancel khi danh sách đang mở
+  await sleep(300);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+  return { ok: true, ds };
 }
