@@ -18,7 +18,7 @@
 <noscript><p>Trang này dựng bằng JavaScript. Agent / công cụ đọc web: đổi /kw-list/&lt;tên bộ&gt; thành /api/lists/&lt;tên bộ&gt;/final.md để đọc bộ keyword final dạng chữ, hoặc /api/lists/&lt;tên bộ&gt;/final.xlsx để tải Excel. Hướng dẫn đầy đủ: <a href="/huong-dan-agent">/huong-dan-agent</a>.</p></noscript>
 <div class="chon-bar" id="chon-bar" hidden>
   <span>Đã chọn <b id="chon-so">0</b> keyword</span>
-  <button class="btn sm" type="button" id="chon-chep">Sao chép</button>
+  <button class="btn sm" type="button" id="chon-chep" title="Mỗi dòng: keyword, tab, search volume">Sao chép</button>
   <button class="btn sm danger" type="button" id="chon-xoa" data-cap="kw.edit" data-need="edit">Xoá khỏi bộ</button>
   <button class="btn sm" type="button" id="chon-bo">Bỏ chọn</button>
 </div>
@@ -192,7 +192,7 @@ function render() {
     <div class="card section">
       <div class="section-head" style="flex-wrap:wrap">
         <div class="grow"><h2>Biến thể</h2><p>Rút từ chính dữ liệu từng ASIN (keyword rank 1–100). Nhóm 1: có ở ≥ 3 ASIN, Nhóm 2: 2 ASIN, Nhóm 3: 1 ASIN; rank tốt nhất trên 50 vào Cần xem xét.</p></div>
-        <button class="btn sm" id="chep-het" type="button" title="Chép keyword của Nhóm 1–3 trong tab này (không lấy Cần xem xét), mỗi dòng 1 keyword, không có tên biến thể">Sao chép tất cả</button>
+        <button class="btn sm" id="chep-het" type="button" title="Chép keyword của Nhóm 1–3 trong tab này (không lấy Cần xem xét), mỗi dòng: keyword, tab, search volume (dán vào Excel thành 2 cột), không có tên biến thể">Sao chép tất cả</button>
         <button class="btn sm" id="mo-het" type="button">${moHet ? "Thu hết" : "Mở hết"}</button>
       </div>
       <div class="tabs" role="tablist" aria-label="Các bước chia biến thể">
@@ -217,9 +217,11 @@ function dongBoHash() {
   history.replaceState(null, "", "#" + (tab === "asin" && asinChon ? "asin-" + asinChon : tab === "chon" ? "chon/" + loaiChon : tab));
 }
 
+// Chép mỗi dòng "keyword<tab>search volume" để dán thẳng vào Excel / Sheet thành 2 cột
 async function chep(kw, ten) {
   if (!kw.length) return toast("Không có keyword để chép", true);
-  const text = kw.join("\n");
+  const sv = new Map(L.rows.map(r => [r.keyword, r.sv]));
+  const text = kw.map(k => `${k}\t${sv.get(k) ?? ""}`).join("\n");
   try { await navigator.clipboard.writeText(text); }
   catch {   // trình duyệt chặn clipboard API: chép bằng ô ẩn
     const t = Object.assign(document.createElement("textarea"), { value: text, style: "position:fixed;opacity:0" });
@@ -283,7 +285,7 @@ function khoi({ ten, tag, nhan, kw, cls, chinh = true, soAsin, rank, nhom, v }) 
   return `<details class="vb ${cls || ""}" data-k="${esc((cls || "") + "|" + (tag || "") + "|" + ten)}" ${moHet ? "open" : ""}>
     <summary>
       <span class="vt"><span class="caret" aria-hidden="true"></span><span class="ten">${esc(ten)}</span>${tag ? `<span class="tag">${tag}</span>` : ""}<span class="sl">(SV: ${fmt(sv)}; ${kw.length} keyword)</span></span>
-      <span class="vm">${v ? song(v) : ""}${nhan !== undefined ? nutLoai(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng 1 keyword" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
+      <span class="vm">${v ? song(v) : ""}${nhan !== undefined ? nutLoai(ten, nhan) : ""}<button type="button" class="btn sm" data-chep="${i}" title="Chép ${kw.length} keyword, mỗi dòng: keyword, tab, search volume" ${kw.length ? "" : "disabled"}>Sao chép</button></span>
       ${duoi ? `<span class="vr">${duoi}</span>` : ""}
     </summary>
     ${kw.length ? bangKw(kw, i) : '<div class="small muted" style="padding:10px 12px">Không có keyword.</div>'}
