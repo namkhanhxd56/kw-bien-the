@@ -384,7 +384,6 @@ function renderS2() {
   const p = product(), bo = p.bo, d = S.draft, f = S.status ? S.status.bo_loc : null;
   const extra = d.asins.filter(a => !p.asin_doi_thu.includes(a));
   const t = tenBo();
-  const daTao = bo && bo.slug === t.slug && JSON.stringify(bo.asins) === JSON.stringify(d.asins);
   const warn = [];
   if (p.asin_trung.length) warn.push(`Ô ASIN trên Lark bị trùng: <span class="mono">${p.asin_trung.map(esc).join(", ")}</span> (đã bỏ bản trùng).`);
   if (d.asins.length < 3) warn.push(`Mới có ${d.asins.length} ASIN đối thủ, cần tối thiểu 3. Bổ sung ở Lark (cột "ASIN đối thủ (>=3)") hoặc thêm tạm bên dưới.`);
@@ -393,7 +392,7 @@ function renderS2() {
     warn.push(`ASIN đối thủ trên Lark đã đổi so với bộ keyword đang lưu, bên trên đang lấy theo Lark`
       + (lech.them.length ? ` · thêm <span class="mono">${lech.them.map(esc).join(", ")}</span>` : "")
       + (lech.bot.length ? ` · bỏ <span class="mono">${lech.bot.map(esc).join(", ")}</span> (keyword đã lấy của ASIN này vẫn giữ, thêm lại là có)` : "")
-      + `. Bấm "Lưu & lấy keyword còn thiếu" để cập nhật bộ. <button type="button" class="btn sm" id="giu-asin-bo">Giữ ASIN cũ của bộ</button>`);
+      + `. Bấm "Lưu bộ" để cập nhật bộ (chưa tốn lượt Cerebro), rồi "Lấy keyword còn thiếu" khi cần. <button type="button" class="btn sm" id="giu-asin-bo">Giữ ASIN cũ của bộ</button>`);
   } else if (lech) {
     warn.push(`Đang giữ ASIN cũ của bộ, khác cột ASIN đối thủ trên Lark. <button type="button" class="btn sm" id="lay-asin-lark">Lấy theo Lark</button>`);
   }
@@ -435,8 +434,9 @@ function renderS2() {
     </div>
 
     <div class="row end">
-      ${bo && !daTao ? '<span class="small muted">Đã đổi ASIN hoặc tên so với bộ đã tạo</span>' : ""}
-      <button class="btn primary" id="btn-fetch" data-cap="kw.edit" data-need="edit" ${d.asins.length < 3 ? "disabled" : ""}>${bo ? "Lưu & lấy keyword còn thiếu" : "Tạo bộ & lấy keyword"}</button>
+      <span class="small muted" id="nut-ghi">${nutS2().ghi}</span>
+      <button class="btn" id="btn-save" data-cap="kw.edit" data-need="edit" title="Chỉ lưu ASIN, niche, loại sản phẩm vào bộ; không xếp job Cerebro" ${nutS2().luu ? "" : "disabled"}>${bo ? "Lưu bộ" : "Tạo bộ"}</button>
+      <button class="btn primary" id="btn-fetch" data-cap="kw.edit" data-need="edit" title="Xếp job Cerebro cho các ASIN của bộ đã lưu mà chưa có keyword (hoặc bị lỗi)" ${nutS2().lay ? "" : "disabled"}>Lấy keyword còn thiếu</button>
     </div>
     <div id="bo-box">${bo ? boHtml(bo) : ""}</div>`;
 
@@ -458,9 +458,10 @@ function renderS2() {
   for (const k of ["niche", "product"]) $("#in-" + k).addEventListener("input", e => {
     S.draft[k] = e.target.value; const t = tenBo();
     $("#pv-ten").textContent = t.ten;
-    $("#btn-fetch").disabled = S.draft.asins.length < 3;   // đủ ≥ 3 ASIN là cho chạy, không đòi niche
+    capNhatNutS2();
   });
-  $("#btn-fetch").addEventListener("click", createAndFetch);
+  $("#btn-save").addEventListener("click", saveBo);
+  $("#btn-fetch").addEventListener("click", () => fetchAsins(null, false));
   bindBo();
 }
 
@@ -522,13 +523,33 @@ function bindBo() {
   box.onchange = e => { if (e.target.dataset.up) upload(e.target.dataset.up, e.target.files[0]); };
 }
 
-async function createAndFetch() {
-  const p = product(), d = S.draft, btn = $("#btn-fetch");
-  btn.disabled = true; btn.textContent = "Đang xếp job…";
+// Lưu bộ và lấy keyword là hai việc riêng: lưu chỉ ghi ASIN/niche, không tốn lượt Cerebro.
+// Lấy keyword chỉ chạy trên bộ đã lưu, nên có thay đổi chưa lưu thì phải lưu trước.
+function nutS2() {
+  const p = product(), bo = p.bo, d = S.draft, t = tenBo();
+  const daLuu = !!bo && bo.slug === t.slug && JSON.stringify(bo.asins) === JSON.stringify(d.asins);
+  const ghi = d.asins.length < 3 ? "Cần tối thiểu 3 ASIN đối thủ"
+    : !bo ? "Tạo bộ trước, rồi bấm Lấy keyword"
+    : !daLuu ? "Có thay đổi chưa lưu (ASIN hoặc tên bộ): bấm Lưu bộ trước khi lấy keyword" : "";
+  return { luu: d.asins.length >= 3 && !daLuu, lay: daLuu && bo.asins.length >= 3, ghi };
+}
+function capNhatNutS2() {
+  const n = nutS2();
+  if ($("#btn-save")) $("#btn-save").disabled = !n.luu;
+  if ($("#btn-fetch")) $("#btn-fetch").disabled = !n.lay;
+  if ($("#nut-ghi")) $("#nut-ghi").textContent = n.ghi;
+}
+
+async function saveBo() {
+  const p = product(), d = S.draft, btn = $("#btn-save"), moi = !p.bo;
+  btn.disabled = true; btn.textContent = "Đang lưu…";
   try {
     const r = await post("/api/lists", { ma: p.ma, niche: d.niche, product: d.product, asins: d.asins });
     setBo(r.list, true);
-    await fetchAsins(null, false);
+    const thieu = r.list.trang_thai_asin.filter(a => a.trang_thai === "chua_lay" || a.trang_thai === "loi").length;
+    if (r.huy_cho && r.huy_cho.length) loadStatus();
+    toast((moi ? "Đã tạo bộ" : "Đã lưu bộ") + ` (${r.list.asins.length} ASIN)`
+      + (r.huy_cho && r.huy_cho.length ? ` · huỷ job đang chờ của ASIN đã bỏ: ${r.huy_cho.join(", ")}` : "") + (thieu ? ` · ${thieu} ASIN chưa có keyword, bấm Lấy keyword còn thiếu khi cần` : ""));
   } catch (e) { toast(e.message, true); renderS2(); }
 }
 

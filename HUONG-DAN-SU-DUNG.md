@@ -86,7 +86,7 @@ Lark vừa được sửa (thêm mã, thêm ASIN) thì bấm **Tải lại từ 
    - Ô **Niche** đặt tên bộ, lấy theo kết luận ảnh ở bước 2 nếu khác Lark.
    - Ô **Product** để `ornament` cho hàng ornament.
    - Tên bộ có dạng `<Mã> - <niche> <product>`, ví dụ `BSV051 - hiking ornament`.
-3. Bấm **Tạo bộ & lấy keyword**. Mỗi ASIN thành một job trong hàng đợi.
+3. Bấm **Tạo bộ** (chỉ lưu, chưa tốn lượt), rồi bấm **Lấy keyword còn thiếu**. Mỗi ASIN thành một job trong hàng đợi.
    - ASIN đã lấy ở bộ khác thì được **dùng lại** ngay, không tốn lượt H10. Bảng ASIN ghi "H10 · dùng lại".
    - ASIN đang chờ ở bộ khác thì chạy chung một lần. Xong là điền cho mọi bộ cần ASIN đó.
 4. Theo dõi bảng trạng thái từng ASIN:
@@ -104,8 +104,9 @@ Lark vừa được sửa (thêm mã, thêm ASIN) thì bấm **Tải lại từ 
 - **Tải file tay:** khi extension không lấy được, tự export Cerebro (xlsx/csv) của đúng ASIN đó rồi nạp vào.
 - **Lấy lại** tốn thêm lượt H10. Chỉ bấm khi thật cần.
 
-Một mã đã có bộ thì nút chính đổi thành **Lưu & lấy keyword còn thiếu**: chỉ lấy các ASIN chưa có, không chạy lại
-ASIN đã xong.
+Lưu và lấy keyword là hai nút riêng. **Lưu bộ** chỉ ghi ASIN, niche, loại sản phẩm vào bộ, không xếp job.
+**Lấy keyword còn thiếu** chỉ chạy trên bộ đã lưu và chỉ lấy các ASIN chưa có (hoặc lỗi), không chạy lại ASIN đã xong;
+còn thay đổi chưa lưu thì nút này khoá, phải bấm Lưu bộ trước.
 
 ### Bước 4. Ghi link về Lark
 
@@ -195,7 +196,7 @@ nhau thì cần người chốt giữ dòng nào và xoá dòng thừa trên Lar
 | Máy báo "H10 chưa đăng nhập" | Phiên Helium 10 hết hạn | Đăng nhập lại H10 trên Chrome máy đó. Job đang dở tự trả về hàng, không mất lượt |
 | ASIN "Lỗi: Hết giờ chờ ô nhập ASIN / ô Time Period" | Trang H10 chậm, hiện popup, hoặc tài khoản chỉ có bản demo | Bấm **Lấy lại**. Lỗi lặp trên cùng một máy thì cài extension bản mới nhất |
 | "Hết lượt Cerebro" | Tài khoản H10 hết lượt trong ngày | Extension tự chuyển tài khoản khác (bản 0.1.9). Hết cả thì job trả về hàng cho máy khác |
-| Biến thể toàn chủ đề lạ | ASIN đối thủ không đúng sản phẩm | Sửa ASIN trên Lark → Tải lại → Lưu & lấy keyword còn thiếu |
+| Biến thể toàn chủ đề lạ | ASIN đối thủ không đúng sản phẩm | Sửa ASIN trên Lark → Tải lại mã này từ Lark → Lưu bộ → Lấy keyword còn thiếu |
 | Không thấy mã mới | Danh sách Lark cũ | Bấm **Tải lại từ Lark** |
 | H10 đổi giao diện, extension lỗi hàng loạt | Bộ lấy không còn khớp trang | Bật **Soi Cerebro** trong popup, làm tay một lượt Cerebro, rồi báo người quản lý tool sửa extension |
 

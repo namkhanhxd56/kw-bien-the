@@ -566,7 +566,12 @@ class Handler(BaseHTTPRequestHandler):
                 asins.append(a)
         meta = store.upsert_list(ma=ma, record_id=prod["record_id"], niche=b.get("niche", ""),
                                  product=b.get("product", ""), asins=asins)
-        self._json({"ok": True, "list": tom_tat_bo(meta)})
+        # ASIN bị bỏ khỏi bộ (thường là ASIN lấy sai) thì huỷ job đang chờ của nó, khỏi tốn lượt Cerebro
+        huy = sorted({j["asin"] for j in store._jobs()
+                      if j["slug"] == meta["slug"] and j["status"] == "queued" and j["asin"] not in asins})
+        for a in huy:
+            store.cancel(meta["slug"], a)
+        self._json({"ok": True, "list": tom_tat_bo(meta), "huy_cho": huy})
 
     def _fetch(self, slug: str):
         meta = store.get_list(slug)
