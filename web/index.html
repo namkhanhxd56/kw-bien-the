@@ -34,6 +34,7 @@
           <option value="dang">Chờ / đang lấy keyword</option>
           <option value="thieu">Bộ còn thiếu ASIN</option>
           <option value="du">Đủ keyword</option>
+          <option value="lech" title="Cột ASIN đối thủ trên Lark đã đổi so với bộ keyword đang lưu trong tool">Lark đổi ASIN so với bộ</option>
           <option value="du3">Đủ 3 ASIN trở lên</option>
           <option value="it">Dưới 3 ASIN</option>
           <option value="anh">Đã xem ảnh</option>
@@ -170,6 +171,14 @@ function boBadge(p) {
   return `<span class="badge ${x === n && n ? "ok" : ""}">Keyword ${x}/${n}</span>`;
 }
 
+// ASIN đối thủ trên Lark khác ASIN của bộ đã lưu (Lark sửa sau khi tạo bộ) → {them, bot} hoặc null
+function lechLark(p) {
+  if (!p.bo) return null;
+  const them = p.asin_doi_thu.filter(a => !p.bo.asins.includes(a)), bot = p.bo.asins.filter(a => !p.asin_doi_thu.includes(a));
+  return them.length || bot.length ? { them, bot } : null;
+}
+const cung = (a, b) => a.length === b.length && a.every(x => b.includes(x));
+
 function trangThai(p) {
   if (!p.bo) return "chua";
   if (p.bo.trang_thai_asin.some(a => a.trang_thai === "cho" || a.trang_thai === "dang_lay")) return "dang";
@@ -178,7 +187,7 @@ function trangThai(p) {
 const LOC = {
   "": () => true, chua: p => !p.bo, dang: p => trangThai(p) === "dang", thieu: p => trangThai(p) === "thieu",
   "du3-chua": p => p.asin_doi_thu.length >= 3 && (!p.bo || !p.bo.trang_thai_asin.some(a => ["xong", "cho", "dang_lay"].includes(a.trang_thai))),
-  du: p => trangThai(p) === "du", du3: p => p.asin_doi_thu.length >= 3, it: p => p.asin_doi_thu.length < 3, anh: p => p.da_phan_tich, "chua-anh": p => !p.da_phan_tich,
+  du: p => trangThai(p) === "du", lech: p => !!lechLark(p), du3: p => p.asin_doi_thu.length >= 3, it: p => p.asin_doi_thu.length < 3, anh: p => p.da_phan_tich, "chua-anh": p => !p.da_phan_tich,
 };
 const XEP = {
   ma: (a, b) => a.ma.localeCompare(b.ma, "vi", { numeric: true }), "ma-": (a, b) => b.ma.localeCompare(a.ma, "vi", { numeric: true }),
@@ -201,7 +210,7 @@ function renderList() {
       <div style="min-width:0">
         <div class="t1">${esc(p.ma)}</div>
         <div class="t2">${esc(p.ten_mau || "—")}</div>
-        <div class="t3"><span class="badge ${n < 3 ? "bad" : ""}">${n} ASIN</span>${boBadge(p)}${p.da_phan_tich ? '<span class="badge ok">Đã xem ảnh</span>' : ""}</div>
+        <div class="t3"><span class="badge ${n < 3 ? "bad" : ""}">${n} ASIN</span>${boBadge(p)}${lechLark(p) ? '<span class="badge warn" title="ASIN đối thủ trên Lark đã đổi so với bộ keyword">Lark đổi ASIN</span>' : ""}${p.da_phan_tich ? '<span class="badge ok">Đã xem ảnh</span>' : ""}</div>
       </div></button>`;
   }).join("") || `<div class="empty small">Không có mã khớp${q || $("#f-tt").value ? '<br><button class="btn sm" id="bo-loc" style="margin-top:8px">Bỏ tìm kiếm và lọc</button>' : ""}</div>`;
   list.scrollTop = top;
@@ -215,6 +224,25 @@ $("#q").addEventListener("input", renderList);
 for (const id of ["#f-tt", "#f-xep"]) $(id).addEventListener("change", renderList);
 $("#btn-reload").addEventListener("click", () => loadProducts(true));
 
+// ---------------------------------------------------------------- tải lại một mã
+async function reloadMa(btn) {
+  const ma = S.sel; if (!ma) return;
+  btn.disabled = true; const cu = btn.textContent; btn.textContent = "Đang đọc Lark…";
+  try {
+    const d = await api(`/api/products/${encodeURIComponent(ma)}/reload`), p = d.product;
+    const i = S.products.findIndex(x => x.ma === ma);
+    const truoc = i >= 0 ? S.products[i].asin_doi_thu.join(" ") : "";
+    if (i >= 0) S.products[i] = p; else S.products.push(p);
+    if (S.sel === ma) select(ma, "giu"); else renderList();   // dựng lại bước 2 theo ASIN mới trên Lark
+    toast(truoc === p.asin_doi_thu.join(" ") ? `Đã đọc lại ${ma}: ASIN đối thủ không đổi`
+      : `Đã đọc lại ${ma}: ${p.asin_doi_thu.length} ASIN đối thủ mới từ Lark`);
+  } catch (e) {
+    toast(`Không đọc lại được ${ma}: ${e.message}`, true);
+    btn.disabled = false; btn.textContent = cu;
+  }
+}
+$("#detail").addEventListener("click", e => { const b = e.target.closest("[data-reload-ma]"); if (b && !b.disabled) reloadMa(b); });
+
 // ---------------------------------------------------------------- chi tiết mã
 function product() { return S.products.find(p => p.ma === S.sel); }
 
@@ -224,7 +252,8 @@ async function select(ma, keepScroll) {
   const p = product();
   const bo = p.bo;
   S.draft = {
-    asins: bo ? [...bo.asins] : [...p.asin_doi_thu],
+    // Lark là nguồn: đã sửa ASIN trên Lark sau khi tạo bộ thì lấy theo Lark (vẫn chọn giữ ASIN cũ được ở bước 2)
+    asins: bo && !lechLark(p) ? [...bo.asins] : [...p.asin_doi_thu],
     // Lark chưa có niche thì tạm lấy tên mẫu, không chặn việc lấy keyword (đủ ≥ 3 ASIN là chạy)
     niche: bo ? bo.niche : (p.niche || p.ten_mau || "").toLowerCase(),
     product: bo ? bo.product : (/ornament/i.test(p.ten_mau) || !p.ten_mau ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
@@ -246,6 +275,7 @@ function renderDetail() {
         <h1>${esc(p.ma)} · ${esc(p.ten_mau || "Chưa có tên mẫu")}</h1>
         <div class="sub small">ASIN mẫu <span class="mono">${esc(p.asin_mau || "—")}</span></div>
       </div>
+      <button class="btn sm" data-reload-ma title="Chỉ đọc lại dòng của mã này trên Lark (ASIN đối thủ, tên mẫu, niche…), không đọc lại cả bảng">Tải lại mã này từ Lark</button>
     </div>
 
     <section class="card section" aria-labelledby="h-s1">
@@ -358,6 +388,15 @@ function renderS2() {
   const warn = [];
   if (p.asin_trung.length) warn.push(`Ô ASIN trên Lark bị trùng: <span class="mono">${p.asin_trung.map(esc).join(", ")}</span> (đã bỏ bản trùng).`);
   if (d.asins.length < 3) warn.push(`Mới có ${d.asins.length} ASIN đối thủ, cần tối thiểu 3. Bổ sung ở Lark (cột "ASIN đối thủ (>=3)") hoặc thêm tạm bên dưới.`);
+  const lech = lechLark(p);
+  if (lech && !cung(d.asins, bo.asins)) {
+    warn.push(`ASIN đối thủ trên Lark đã đổi so với bộ keyword đang lưu, bên trên đang lấy theo Lark`
+      + (lech.them.length ? ` · thêm <span class="mono">${lech.them.map(esc).join(", ")}</span>` : "")
+      + (lech.bot.length ? ` · bỏ <span class="mono">${lech.bot.map(esc).join(", ")}</span> (keyword đã lấy của ASIN này vẫn giữ, thêm lại là có)` : "")
+      + `. Bấm "Lưu & lấy keyword còn thiếu" để cập nhật bộ. <button type="button" class="btn sm" id="giu-asin-bo">Giữ ASIN cũ của bộ</button>`);
+  } else if (lech) {
+    warn.push(`Đang giữ ASIN cũ của bộ, khác cột ASIN đối thủ trên Lark. <button type="button" class="btn sm" id="lay-asin-lark">Lấy theo Lark</button>`);
+  }
   if (extra.length) warn.push(`ASIN thêm tạm (viền đứt) chỉ lưu trong tool, chưa ghi về Lark.`);
 
   $("#s2").innerHTML = `
@@ -374,7 +413,8 @@ function renderS2() {
     </div>
 
     <div>
-      <div class="field"><label>ASIN đối thủ (${d.asins.length})</label></div>
+      <div class="row" style="gap:8px;align-items:center"><div class="field"><label>ASIN đối thủ (${d.asins.length})</label></div>
+        <button type="button" class="btn sm" data-reload-ma title="Vừa sửa ASIN đối thủ của mã này trên Lark thì bấm để đọc lại riêng mã này">Đọc lại ASIN từ Lark</button></div>
       <div class="chips" id="chips" style="margin:6px 0 8px">
         ${d.asins.map(a => `<span class="chip ${p.asin_doi_thu.includes(a) ? "" : "added"}">${a}<button type="button" data-rm="${a}" aria-label="Bỏ ${a}">×</button></span>`).join("") || '<span class="small muted">Chưa có ASIN nào</span>'}
       </div>
@@ -404,6 +444,9 @@ function renderS2() {
     const a = e.target.dataset.rm; if (!a) return;
     S.draft.asins = S.draft.asins.filter(x => x !== a); renderS2();
   });
+  const giu = $("#giu-asin-bo"), lay = $("#lay-asin-lark");
+  if (giu) giu.onclick = () => { S.draft.asins = [...bo.asins]; renderS2(); };
+  if (lay) lay.onclick = () => { S.draft.asins = [...p.asin_doi_thu]; renderS2(); };
   $("#add-asin").addEventListener("submit", e => {
     e.preventDefault();
     const a = $("#new-asin").value.trim().toUpperCase();
@@ -429,7 +472,7 @@ function boHtml(bo) {
     const ghi = [...(a.loi ? [`<span style="color:var(--bad)">${esc(a.loi)}</span>`] : []), ...a.canh_bao.map(c => `<span style="color:var(--warn)">${esc(c)}</span>`)];
     const busy = a.trang_thai === "cho" || a.trang_thai === "dang_lay";
     return `<tr class="${ghi.length ? "has-sub" : ""}">
-      <td class="mono">${a.asin}</td>
+      <td class="mono"><a href="https://www.amazon.com/dp/${esc(a.asin)}" target="_blank" rel="noopener" title="Mở trang Amazon của ${esc(a.asin)}">${esc(a.asin)}</a></td>
       <td><span class="badge ${cls}">${lbl}</span></td>
       <td>${ky}</td>
       <td class="num">${a.so_kw ? a.so_kw.toLocaleString("vi-VN") : "—"}</td>

@@ -232,34 +232,80 @@ def list_products(refresh: bool = False) -> list[dict]:
     with _khoa:
         if _cache["items"] and not refresh:
             return _cache["items"]
-        items = []
-        for rid, cell in _rows():
-            ma = _text(cell.get(F_MA))
-            if not ma:
-                continue
-            asins, dup = parse_asins(_text(cell.get(F_ASIN_DT)))
-            items.append({
-                "record_id": rid,
-                "ma": ma,
-                "ten_mau": _text(cell.get(F_TEN_MAU)),
-                "niche": _text(cell.get(F_NICHE)),
-                "chat_lieu": _text(cell.get(F_CHAT_LIEU)),
-                "asin_mau": _text(cell.get(F_ASIN_MAU)),
-                "asin_doi_thu": asins,
-                "asin_trung": dup,
-                "link_kw": _text(cell.get(F_LINK)),
-                "bien_the": _text(cell.get(F_BIEN_THE)),
-                "co_anh": bool(_text(cell.get(F_ANH))),
-            })
+        items = [it for it in (_item(rid, cell) for rid, cell in _rows()) if it]
         _cache.update(at=time.time(), items=items)
-        if CACHE_FILE:
-            try:
-                tmp = CACHE_FILE.with_suffix(".tmp")
-                tmp.write_text(json.dumps({"at": _cache["at"], "items": items}, ensure_ascii=False), "utf-8")
-                tmp.replace(CACHE_FILE)
-            except OSError:
-                pass
+        _luu_cache()
         return items
+
+
+def _item(rid: str, cell: dict) -> dict | None:
+    ma = _text(cell.get(F_MA))
+    if not ma:
+        return None
+    asins, dup = parse_asins(_text(cell.get(F_ASIN_DT)))
+    return {
+        "record_id": rid,
+        "ma": ma,
+        "ten_mau": _text(cell.get(F_TEN_MAU)),
+        "niche": _text(cell.get(F_NICHE)),
+        "chat_lieu": _text(cell.get(F_CHAT_LIEU)),
+        "asin_mau": _text(cell.get(F_ASIN_MAU)),
+        "asin_doi_thu": asins,
+        "asin_trung": dup,
+        "link_kw": _text(cell.get(F_LINK)),
+        "bien_the": _text(cell.get(F_BIEN_THE)),
+        "co_anh": bool(_text(cell.get(F_ANH))),
+    }
+
+
+def _luu_cache() -> None:
+    """Gọi khi đang giữ _khoa."""
+    if not CACHE_FILE:
+        return
+    try:
+        tmp = CACHE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"at": _cache["at"], "items": _cache["items"]}, ensure_ascii=False), "utf-8")
+        tmp.replace(CACHE_FILE)
+    except OSError:
+        pass
+
+
+def _rows_cua_ma(ma: str) -> list[tuple[str, dict]]:
+    """Các dòng của một mã trong view nguồn (thường 1 dòng) → [(record_id, {tên field: giá trị})]. Tốn 1 lượt API."""
+    if BACKEND == "openapi":
+        return _search(TABLE, {"view_id": VIEW, "automatic_fields": False, "filter": {
+            "conjunction": "and", "conditions": [{"field_name": F_MA, "operator": "is", "value": [ma]}]}})
+    # lark-cli (ở máy): đọc theo record_id đã biết trong danh sách
+    rids = [p["record_id"] for p in _cache["items"] if p["ma"] == ma]
+    if not rids:
+        raise LarkError(f"Mã {ma} chưa có trong danh sách, bấm Tải lại từ Lark để đọc cả bảng")
+    args = ["base", "+record-get", "--base-token", BASE, "--table-id", TABLE, "--format", "json"]
+    for r in rids:
+        args += ["--record-id", r]
+    d = _run(args)
+    names = d.get("fields") or []
+    return [(rid, dict(zip(names, row))) for rid, row in zip(d.get("record_id_list") or [], d.get("data") or [])]
+
+
+def reload_product(ma: str) -> dict | None:
+    """Đọc lại MỘT mã từ Lark và thay vào danh sách đang nhớ (khỏi đọc lại ~1.500 dòng).
+    Trả về bản mới, hoặc None nếu mã không còn trong view nguồn (đã xoá khỏi danh sách)."""
+    ma = ma.strip()
+    list_products()   # bảo đảm đã có danh sách (và record_id cho đường lark-cli)
+    moi = [it for it in (_item(rid, cell) for rid, cell in _rows_cua_ma(ma)) if it and it["ma"] == ma]
+    with _khoa:
+        items, chen = [], False
+        for p in _cache["items"]:
+            if p["ma"] != ma:
+                items.append(p)
+            elif not chen:   # giữ đúng vị trí cũ của mã trong thứ tự Lark
+                items += moi
+                chen = True
+        if not chen:
+            items += moi     # mã mới thêm trên Lark: tạm đặt cuối, Tải lại cả bảng sẽ xếp đúng thứ tự
+        _cache["items"] = items
+        _luu_cache()
+    return moi[0] if moi else None
 
 
 def _doc_lai_ngam() -> None:

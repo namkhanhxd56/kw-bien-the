@@ -297,6 +297,20 @@ def danh_sach_ma(refresh: bool = False) -> list[dict]:
     return out
 
 
+def mot_ma(ma: str) -> dict | None:
+    """Đọc lại một mã từ Lark (nút "Tải lại mã này"), ghép bộ keyword như danh sách đầy đủ."""
+    p = lark.reload_product(ma)
+    with _sp_khoa:
+        _sp["luc"] = 0.0   # danh sách mã lần gọi sau phải dựng lại, có bản mới của mã này
+    if not p:
+        return None
+    meta = store.lists_by_ma().get(p["ma"])
+    jobs = [j for j in store._jobs() if meta and j["slug"] == meta["slug"]]
+    return {**p, "bo": tom_tat_bo(meta, jobs=jobs) if meta else None,
+            "da_phan_tich": bool(store.get_analysis(p["ma"]).get("ket_luan")),
+            "anh_cache": (DATA / "img").is_dir() and any(f.split(".")[0] == p["ma"] for f in os.listdir(DATA / "img"))}
+
+
 def sap_uu_tien(ds: list[str], cho: dict[str, set], dang: set) -> tuple[list[str], list[str]]:
     """Xếp ASIN của các mã cần ưu tiên → (thứ tự ASIN, thứ tự mã).
     w(ASIN) = số mã trong danh sách cùng chờ ASIN đó. Mỗi bước chọn mã có ASIN dùng chung nhiều nhất
@@ -421,6 +435,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self._status()
                 if path == "/api/products":
                     return self._products(q.get("refresh") == ["1"])
+                m = re.fullmatch(r"/api/products/([^/]+)/reload", path)
+                if m:
+                    ma = m.group(1)
+                    p = mot_ma(ma)
+                    if not p:
+                        return self._err(404, f"Không còn thấy mã {ma} trong bảng Lark (view nguồn)")
+                    return self._json({"ok": True, "product": p})
                 m = re.fullmatch(r"/api/products/([^/]+)/image", path)
                 if m:
                     return self._image(m.group(1), q.get("cached") != ["1"])
