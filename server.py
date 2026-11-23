@@ -46,6 +46,7 @@ import auth
 import cerebro
 import engine
 import lark
+import sao_luu
 import xuat
 from store import KY_CHINH, KY_HIEN_TAI, Store, thu_tu_chay
 
@@ -480,6 +481,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._status()
                 if path == "/api/products":
                     return self._products(q.get("refresh") == ["1"])
+                if path == "/api/sao-luu/dau":
+                    return self._json(sao_luu.dau(DATA))
+                if path == "/api/sao-luu.tar.gz":
+                    return self._sao_luu()
                 m = re.fullmatch(r"/api/products/([^/]+)/reload", path)
                 if m:
                     ma = m.group(1)
@@ -867,6 +872,13 @@ class Handler(BaseHTTPRequestHandler):
             for it in items[:200]:
                 f.write(json.dumps(it, ensure_ascii=False) + "\n")
         self._json({"ok": True, "so": len(items[:200])})
+
+    def _sao_luu(self):
+        """Bản sao toàn kho cho máy khác lưu (Mac mini). Không có img/ và capture/ (xem sao_luu.py)."""
+        body, info = sao_luu.nen(DATA)
+        self._send(200, body, "application/gzip", {
+            "X-Sao-Luu-Dau": info["dau"], "X-Sao-Luu-So-File": str(info["so_file"]),
+            "Content-Disposition": 'attachment; filename="kw-bien-the-%s.tar.gz"' % time.strftime("%Y%m%d-%H%M")})
 
     def _agent_capture_file(self, ten: str):
         # Request H10 đã ghi: chỉ trao cho ai có AGENT_TOKEN (dù đã ẩn cookie/token, vẫn là dữ liệu tài khoản)
