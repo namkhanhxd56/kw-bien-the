@@ -48,6 +48,13 @@
         </select>
       </div>
       <div class="loc-dem small muted" id="loc-dem"></div>
+      <div class="bulk" id="bulk">
+        <label class="bulk-het small"><input type="checkbox" id="chon-het"> <span id="chon-het-ten">Chọn tất cả</span></label>
+        <div class="bulk-nut">
+          <button class="btn sm" id="b-luu" data-cap="kw.edit" data-need="edit" disabled>Lưu bộ</button>
+          <button class="btn sm primary" id="b-lay" data-cap="kw.edit" data-need="edit" disabled>Lấy KW còn thiếu</button>
+        </div>
+      </div>
     </div>
     <div class="side-list" id="list" role="listbox" aria-label="Danh sách mã"></div>
   </aside>
@@ -85,7 +92,7 @@ const TT = {
   xong: ["Xong", "ok"], rong: ["Không có dữ liệu", "warn"], loi: ["Lỗi", "bad"],
 };
 
-let S = { products: [], sel: null, status: null, poll: null, draft: {} };
+let S = { products: [], sel: null, status: null, poll: null, draft: {}, chon: new Set(), hien: [] };
 
 async function api(path, opt = {}) {
   const r = await fetch(path, opt);
@@ -198,6 +205,7 @@ function renderList() {
   const q = $("#q").value.trim().toLowerCase(), loc = LOC[$("#f-tt").value] || LOC[""], xep = XEP[$("#f-xep").value];
   let items = S.products.filter(p => loc(p) && (!q || [p.ma, p.ten_mau, p.niche, ...p.asin_doi_thu].join(" ").toLowerCase().includes(q)));
   if (xep) items = [...items].sort(xep);
+  S.hien = items.map(p => p.ma);
   $("#loc-dem").textContent = !S.products.length ? "Đang tải danh sách mã…"
     : items.length === S.products.length ? `${S.products.length} mã` : `${items.length}/${S.products.length} mã khớp`;
   // vẽ lại danh sách mà giữ nguyên chỗ đang cuộn (tạo bộ, poll job đều gọi lại hàm này)
@@ -205,20 +213,105 @@ function renderList() {
   list.innerHTML = items.map(p => {
     const n = p.asin_doi_thu.length;
     const thumb = p.anh_cache ? `<img class="thumb" src="/api/products/${encodeURIComponent(p.ma)}/image?cached=1" alt="">` : `<div class="thumb">${esc(p.ma.slice(0, 3))}</div>`;
-    return `<button class="item ${p.ma === S.sel ? "active" : ""}" data-ma="${esc(p.ma)}" role="option" aria-selected="${p.ma === S.sel}">
+    return `<div class="item-wrap"><input type="checkbox" class="chon" data-chon="${esc(p.ma)}" aria-label="Chọn ${esc(p.ma)}" ${S.chon.has(p.ma) ? "checked" : ""}>
+      <button class="item ${p.ma === S.sel ? "active" : ""}" data-ma="${esc(p.ma)}" role="option" aria-selected="${p.ma === S.sel}">
       ${thumb}
       <div style="min-width:0">
         <div class="t1">${esc(p.ma)}</div>
         <div class="t2">${esc(p.ten_mau || "—")}</div>
         <div class="t3"><span class="badge ${n < 3 ? "bad" : ""}">${n} ASIN</span>${boBadge(p)}${lechLark(p) ? '<span class="badge warn" title="ASIN đối thủ trên Lark đã đổi so với bộ keyword">Lark đổi ASIN</span>' : ""}${p.da_phan_tich ? '<span class="badge ok">Đã xem ảnh</span>' : ""}</div>
-      </div></button>`;
+      </div></button></div>`;
   }).join("") || `<div class="empty small">Không có mã khớp${q || $("#f-tt").value ? '<br><button class="btn sm" id="bo-loc" style="margin-top:8px">Bỏ tìm kiếm và lọc</button>' : ""}</div>`;
   list.scrollTop = top;
+  renderBulk();
 }
 
 $("#list").addEventListener("click", e => {
   if (e.target.id === "bo-loc") { $("#q").value = ""; $("#f-tt").value = ""; return renderList(); }
   const b = e.target.closest(".item"); if (b) select(b.dataset.ma);
+});
+$("#list").addEventListener("change", e => {
+  const ma = e.target.dataset.chon; if (!ma) return;
+  e.target.checked ? S.chon.add(ma) : S.chon.delete(ma);
+  renderBulk();
+});
+
+// ---------------------------------------------------------------- làm nhiều mã một lần
+// Giá trị mặc định của bước 2 cho một mã (giống khi mở mã đó mà không sửa gì)
+function macDinh(p) {
+  const bo = p.bo;
+  return {
+    // Lark là nguồn: đã sửa ASIN trên Lark sau khi tạo bộ thì lấy theo Lark
+    asins: bo && !lechLark(p) ? [...bo.asins] : [...p.asin_doi_thu],
+    // Lark chưa có niche thì tạm lấy tên mẫu, không chặn việc lấy keyword (đủ ≥ 3 ASIN là chạy)
+    niche: bo ? bo.niche : (p.niche || p.ten_mau || "").toLowerCase(),
+    product: bo ? bo.product : (/ornament/i.test(p.ten_mau) || !p.ten_mau ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
+  };
+}
+// Lưu bộ: đủ ≥ 3 ASIN và chưa có bộ, hoặc ASIN trên Lark khác bộ đang lưu
+const duLuu = p => p.asin_doi_thu.length >= 3 && (!p.bo || !!lechLark(p));
+// Lấy KW còn thiếu: bộ đã lưu khớp Lark, ≥ 3 ASIN, còn ASIN chưa có keyword hoặc bị lỗi
+const duLay = p => !!p.bo && !lechLark(p) && p.bo.asins.length >= 3
+  && p.bo.trang_thai_asin.some(a => a.trang_thai === "chua_lay" || a.trang_thai === "loi");
+const daChon = () => S.products.filter(p => S.chon.has(p.ma));
+
+function renderBulk() {
+  const hien = S.hien, chonHien = hien.filter(m => S.chon.has(m)).length, het = $("#chon-het");
+  het.checked = hien.length > 0 && chonHien === hien.length;
+  het.indeterminate = chonHien > 0 && chonHien < hien.length;
+  het.disabled = !hien.length;
+  const ds = daChon(), nLuu = ds.filter(duLuu).length, nLay = ds.filter(duLay).length;
+  const an = S.products.length && ds.length > chonHien ? ` · ${ds.length - chonHien} mã đang bị lọc ẩn` : "";
+  $("#chon-het-ten").textContent = ds.length ? `Đã chọn ${ds.length} mã${an}` : `Chọn tất cả (${hien.length})`;
+  const quyen = AUTHUI.can("kw.edit", "edit");
+  const bl = $("#b-luu"), bf = $("#b-lay");
+  bl.textContent = `Lưu bộ (${nLuu})`; bf.textContent = `Lấy KW còn thiếu (${nLay})`;
+  bl.disabled = !quyen || !nLuu; bf.disabled = !quyen || !nLay;
+  if (quyen) {
+    bl.title = nLuu ? `${nLuu}/${ds.length} mã cần lưu: đủ ≥ 3 ASIN, chưa có bộ hoặc ASIN trên Lark đã đổi. Không tốn lượt Cerebro`
+      : ds.length ? "Không mã nào cần lưu: dưới 3 ASIN, hoặc bộ đã khớp Lark" : "Tích chọn mã ở danh sách bên dưới";
+    bf.title = nLay ? `${nLay}/${ds.length} mã đủ điều kiện: bộ đã lưu khớp Lark, ≥ 3 ASIN, còn ASIN chưa có keyword`
+      : ds.length ? "Không mã nào đủ điều kiện: chưa lưu bộ (bấm Lưu bộ trước), dưới 3 ASIN, hoặc đã đủ keyword" : "Tích chọn mã ở danh sách bên dưới";
+  }
+}
+
+$("#chon-het").addEventListener("change", e => {
+  for (const m of S.hien) e.target.checked ? S.chon.add(m) : S.chon.delete(m);
+  renderList();
+});
+
+async function chayBulk(btn, viec, body, ghi) {
+  btn.disabled = true; const cu = btn.textContent; btn.textContent = "Đang làm…";
+  try {
+    const r = await post("/api/bulk/" + viec, body), kq = r.ket_qua;
+    const loi = kq.filter(x => !x.ok);
+    toast(ghi(kq.filter(x => x.ok)) + (loi.length ? ` · ${loi.length} mã lỗi: ` + loi.slice(0, 3).map(x => `${x.ma || x.slug} (${x.loi})`).join("; ") + (loi.length > 3 ? "…" : "") : ""), loi.length > 0);
+    const d = await api("/api/products"); S.products = d.products;
+    renderList();
+    if (S.sel && product()) select(S.sel, "giu");
+    loadStatus();
+  } catch (e) { toast(e.message, true); btn.textContent = cu; renderBulk(); }
+}
+
+$("#b-luu").addEventListener("click", e => {
+  const ds = daChon().filter(duLuu);
+  chayBulk(e.currentTarget, "luu", { items: ds.map(p => ({ ma: p.ma, ...macDinh(p) })) },
+    ok => `Đã lưu ${ok.length} bộ (chưa tốn lượt Cerebro)` + (ok.some(x => x.huy_cho.length) ? " · huỷ job chờ của ASIN đã bỏ" : ""));
+});
+
+$("#b-lay").addEventListener("click", async e => {
+  const btn = e.currentTarget;   // sau await thì e.currentTarget thành null
+  const ds = daChon().filter(duLay), bo = daChon().length - ds.length;
+  const thieu = ds.reduce((s, p) => s + p.bo.trang_thai_asin.filter(a => a.trang_thai === "chua_lay" || a.trang_thai === "loi").length, 0);
+  const ok = await confirmBox(`Lấy keyword còn thiếu cho ${ds.length} mã?`,
+    `Xếp job Cerebro cho <b>${thieu}</b> ASIN chưa có keyword. ASIN đã lấy ở bộ khác được dùng lại, không tốn lượt.` +
+    (bo ? `<br><br>Bỏ qua ${bo} mã chưa đủ điều kiện (chưa lưu bộ, dưới 3 ASIN, hoặc đã đủ keyword).` : ""), "Xếp job");
+  if (!ok) return;
+  chayBulk(btn, "lay", { slugs: ds.map(p => p.bo.slug) }, kq => {
+    const xep = kq.reduce((s, x) => s + x.xep_hang.length, 0), luot = kq.reduce((s, x) => s + x.luot_moi, 0),
+      dl = kq.reduce((s, x) => s + x.dung_lai.length, 0);
+    return `${kq.length} mã: xếp ${xep} ASIN vào hàng đợi (tốn ${luot} lượt)` + (dl ? `, dùng lại ${dl} ASIN` : "");
+  });
 });
 $("#q").addEventListener("input", renderList);
 for (const id of ["#f-tt", "#f-xep"]) $(id).addEventListener("change", renderList);
@@ -251,13 +344,7 @@ async function select(ma, keepScroll) {
   renderList();
   const p = product();
   const bo = p.bo;
-  S.draft = {
-    // Lark là nguồn: đã sửa ASIN trên Lark sau khi tạo bộ thì lấy theo Lark (vẫn chọn giữ ASIN cũ được ở bước 2)
-    asins: bo && !lechLark(p) ? [...bo.asins] : [...p.asin_doi_thu],
-    // Lark chưa có niche thì tạm lấy tên mẫu, không chặn việc lấy keyword (đủ ≥ 3 ASIN là chạy)
-    niche: bo ? bo.niche : (p.niche || p.ten_mau || "").toLowerCase(),
-    product: bo ? bo.product : (/ornament/i.test(p.ten_mau) || !p.ten_mau ? "ornament" : (p.ten_mau.split(/\s+/).pop() || "").toLowerCase()),
-  };
+  S.draft = macDinh(p);   // vẫn chọn giữ ASIN cũ của bộ được ở bước 2
   renderDetail();
   // chọn mã khác: chỉ cột phải về đầu, cột trái đứng yên; mở từ link (#mã) thì kéo mã đó vào tầm nhìn
   if (!keepScroll) cuonPhai().scrollTo(0, 0);

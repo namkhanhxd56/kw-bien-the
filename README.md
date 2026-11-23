@@ -18,6 +18,11 @@ HOST=127.0.0.1 PORT=8796 python3 -u server.py
    - Nếu kỳ 12/2025 trả về 0 dòng (sản phẩm mới), server tự xếp lại job với **kỳ hiện tại, bỏ Time Period
      và không lọc SV / organic rank**. Kỳ đã dùng được ghi cho từng ASIN.
    - Khi extension chưa lấy được: bấm "Tải file tay" để nạp file Cerebro đã export (xlsx/csv).
+   - **Làm nhiều mã một lần** (cột trái): tích ô từng mã hoặc "Chọn tất cả" (chọn các mã đang hiện theo tìm kiếm/lọc).
+     "Lưu bộ (n)" lưu mặc định (ASIN theo Lark, niche/loại sản phẩm như khi mở mã) cho mã đủ ≥ 3 ASIN mà chưa có bộ
+     hoặc Lark đã đổi ASIN. "Lấy KW còn thiếu (n)" chỉ chạy cho mã đủ điều kiện (bộ đã lưu khớp Lark, ≥ 3 ASIN, còn
+     ASIN chưa có keyword); không mã nào đủ thì nút mờ. API: `POST /api/bulk/luu {items}` và `POST /api/bulk/lay {slugs}`,
+     mỗi mã làm riêng, mã lỗi trả lý do mà không chặn mã khác.
 3. **Trang `/kw-list/<tên bộ>`.** Hiển thị keyword đã gộp: mỗi keyword giữ dòng có organic rank tốt nhất, hoà thì lấy SV cao hơn. Có lọc, sắp xếp, tải CSV. Nút "Ghi link vào Lark" ghi vào cột `Link bộ Keyword`, có hộp xác nhận trước khi ghi.
 4. **Biến thể** (thẻ "Biến thể" trên trang `/kw-list/<tên bộ>`, `engine.chia_nhom`). Giải thích đầy đủ bằng lời thường, có ví dụ: [CACH-PHAN-LOAI.md](CACH-PHAN-LOAI.md) — sửa luật trong `engine.py` thì sửa file đó cho khớp.
    - **Phân loại keyword:** có personalized / personalize / personalise / custom / customized… → **Personalized**; không thì

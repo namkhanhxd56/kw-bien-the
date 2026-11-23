@@ -311,6 +311,51 @@ def mot_ma(ma: str) -> dict | None:
             "anh_cache": (DATA / "img").is_dir() and any(f.split(".")[0] == p["ma"] for f in os.listdir(DATA / "img"))}
 
 
+def luu_bo(ma, niche: str, product: str, asins_in: list) -> tuple[dict, list[str]]:
+    """Lưu ASIN / niche / loại sản phẩm vào bộ (không tốn lượt Cerebro) → (meta, ASIN bị huỷ job chờ)."""
+    ma = str(ma or "").strip()
+    prod = lark.find_product(ma)
+    if not prod:
+        raise ValueError(f"Không thấy mã {ma} trong bảng Lark")
+    asins = []
+    for a in asins_in:
+        a = str(a).strip().upper()
+        if not lark.ASIN_RE.fullmatch(a):
+            raise ValueError(f"ASIN không hợp lệ: {a}")
+        if a not in asins:
+            asins.append(a)
+    meta = store.upsert_list(ma=ma, record_id=prod["record_id"], niche=niche or "", product=product or "", asins=asins)
+    # ASIN bị bỏ khỏi bộ (thường là ASIN lấy sai) thì huỷ job đang chờ của nó, khỏi tốn lượt Cerebro
+    huy = sorted({j["asin"] for j in store._jobs()
+                  if j["slug"] == meta["slug"] and j["status"] == "queued" and j["asin"] not in asins})
+    for a in huy:
+        store.cancel(meta["slug"], a)
+    return meta, huy
+
+
+def lay_thieu(meta: dict, asins: list | None = None, lay_lai: bool = False) -> dict:
+    """Xếp job Cerebro cho các ASIN của bộ chưa có keyword (hoặc lỗi). Lỗi điều kiện → ValueError."""
+    slug = meta["slug"]
+    chon = [a for a in (asins or meta["asins"]) if a in meta["asins"]]
+    if len(meta["asins"]) < 3:
+        raise ValueError("Cần tối thiểu 3 ASIN đối thủ trước khi lấy keyword")
+    st = {s["asin"]: s for s in trang_thai_asin(slug, meta["asins"])}
+    can = [a for a in chon if lay_lai or st[a]["trang_thai"] in ("chua_lay", "loi")]
+    # ASIN đã lấy ở bộ khác thì chép sang, không tốn lượt (bấm "Lấy lại" mới chạy Cerebro mới)
+    dung_lai = [] if lay_lai else [a for a in can if store.dung_lai_asin(slug, a)]
+    can = [a for a in can if a not in dung_lai]
+    # ASIN đang chờ ở bộ khác: vẫn xếp nhưng không tốn thêm lượt, xong là điền chung
+    cho_chung = store.asin_dang_cho()
+    moi = [a for a in can if a not in cho_chung]
+    con_lai = DAILY_LIMIT - store.usage_today() - store.queue_size()
+    if DAILY_LIMIT > 0 and len(moi) > max(con_lai, 0):
+        raise ValueError(f"Vượt giới hạn {DAILY_LIMIT} lượt Cerebro/ngày (còn {max(con_lai, 0)} lượt)"
+                         + (f" · đã dùng lại {len(dung_lai)} ASIN từ bộ khác" if dung_lai else ""))
+    for a in can:
+        store.enqueue(slug, a)
+    return {"xep_hang": can, "dung_lai": dung_lai, "luot_moi": len(moi)}
+
+
 def sap_uu_tien(ds: list[str], cho: dict[str, set], dang: set) -> tuple[list[str], list[str]]:
     """Xếp ASIN của các mã cần ưu tiên → (thứ tự ASIN, thứ tự mã).
     w(ASIN) = số mã trong danh sách cùng chờ ASIN đó. Mỗi bước chọn mã có ASIN dùng chung nhiều nhất
@@ -484,6 +529,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"ok": True, **store.dung_lai_tat_ca()})
                 if path == "/api/lists":
                     return self._create_list()
+                m = re.fullmatch(r"/api/bulk/(luu|lay)", path)
+                if m:
+                    return self._bulk(m.group(1))
                 m = re.fullmatch(r"/api/analysis/([^/]+)", path)
                 if m:
                     return self._json({"ok": True, "analysis": store.save_analysis(m.group(1), self._jbody())})
@@ -553,24 +601,7 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------ bộ keyword
     def _create_list(self):
         b = self._jbody()
-        ma = (b.get("ma") or "").strip()
-        prod = lark.find_product(ma)
-        if not prod:
-            raise ValueError(f"Không thấy mã {ma} trong bảng Lark")
-        asins = []
-        for a in b.get("asins") or []:
-            a = str(a).strip().upper()
-            if not lark.ASIN_RE.fullmatch(a):
-                raise ValueError(f"ASIN không hợp lệ: {a}")
-            if a not in asins:
-                asins.append(a)
-        meta = store.upsert_list(ma=ma, record_id=prod["record_id"], niche=b.get("niche", ""),
-                                 product=b.get("product", ""), asins=asins)
-        # ASIN bị bỏ khỏi bộ (thường là ASIN lấy sai) thì huỷ job đang chờ của nó, khỏi tốn lượt Cerebro
-        huy = sorted({j["asin"] for j in store._jobs()
-                      if j["slug"] == meta["slug"] and j["status"] == "queued" and j["asin"] not in asins})
-        for a in huy:
-            store.cancel(meta["slug"], a)
+        meta, huy = luu_bo(b.get("ma"), b.get("niche", ""), b.get("product", ""), b.get("asins") or [])
         self._json({"ok": True, "list": tom_tat_bo(meta), "huy_cho": huy})
 
     def _fetch(self, slug: str):
@@ -578,26 +609,34 @@ class Handler(BaseHTTPRequestHandler):
         if not meta:
             return self._err(404, "Chưa có bộ keyword này")
         b = self._jbody()
-        chon = [a for a in (b.get("asins") or meta["asins"]) if a in meta["asins"]]
-        if len(meta["asins"]) < 3:
-            raise ValueError("Cần tối thiểu 3 ASIN đối thủ trước khi lấy keyword")
-        lay_lai = bool(b.get("lay_lai"))
-        st = {s["asin"]: s for s in trang_thai_asin(slug, meta["asins"])}
-        can = [a for a in chon if lay_lai or st[a]["trang_thai"] in ("chua_lay", "loi")]
-        # ASIN đã lấy ở bộ khác thì chép sang, không tốn lượt (bấm "Lấy lại" mới chạy Cerebro mới)
-        dung_lai = [] if lay_lai else [a for a in can if store.dung_lai_asin(slug, a)]
-        can = [a for a in can if a not in dung_lai]
-        # ASIN đang chờ ở bộ khác: vẫn xếp nhưng không tốn thêm lượt, xong là điền chung
-        cho_chung = store.asin_dang_cho()
-        moi = [a for a in can if a not in cho_chung]
-        con_lai = DAILY_LIMIT - store.usage_today() - store.queue_size()
-        if DAILY_LIMIT > 0 and len(moi) > max(con_lai, 0):
-            raise ValueError(f"Vượt giới hạn {DAILY_LIMIT} lượt Cerebro/ngày (còn {max(con_lai, 0)} lượt)"
-                             + (f" · đã dùng lại {len(dung_lai)} ASIN từ bộ khác" if dung_lai else ""))
-        for a in can:
-            store.enqueue(slug, a)
-        self._json({"ok": True, "xep_hang": can, "dung_lai": dung_lai, "luot_moi": len(moi),
-                    "list": tom_tat_bo(meta)})
+        kq = lay_thieu(meta, b.get("asins"), bool(b.get("lay_lai")))
+        self._json({"ok": True, **kq, "list": tom_tat_bo(meta)})
+
+    def _bulk(self, viec: str):
+        """Làm cho nhiều mã một lần. Mỗi mã làm riêng: mã lỗi ghi lý do, các mã khác vẫn chạy."""
+        b = self._jbody()
+        kq = []
+        if viec == "luu":
+            for it in (b.get("items") or [])[:2000]:
+                ma = str(it.get("ma") or "").strip()
+                try:
+                    meta, huy = luu_bo(ma, it.get("niche", ""), it.get("product", ""), it.get("asins") or [])
+                    kq.append({"ma": ma, "ok": True, "slug": meta["slug"], "huy_cho": huy})
+                except ValueError as e:
+                    kq.append({"ma": ma, "ok": False, "loi": str(e)})
+        else:
+            for slug in (b.get("slugs") or [])[:2000]:
+                meta = store.get_list(slug)
+                if not meta:
+                    kq.append({"slug": slug, "ok": False, "loi": "Chưa có bộ keyword này"})
+                    continue
+                try:
+                    kq.append({"slug": slug, "ma": meta["ma"], "ok": True, **lay_thieu(meta)})
+                except ValueError as e:
+                    kq.append({"slug": slug, "ma": meta["ma"], "ok": False, "loi": str(e)})
+        with _sp_khoa:
+            _sp["luc"] = 0                       # danh sách mã đọc lại ngay lần gọi tới
+        self._json({"ok": True, "ket_qua": kq})
 
     def _cancel(self, slug: str):
         meta = store.get_list(slug)
