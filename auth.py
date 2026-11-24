@@ -75,6 +75,7 @@ ROUTES = [
     ("GET", r"/api/lists/[^/]+/final\.(xlsx|md)", "kw.view", "view"),
     ("GET", r"/huong-dan-agent(\.md)?", "kw.view", "view"),
     ("GET", r"/api/lists/[^/]+/bien-the", "kw.view", "view"),
+    ("GET", r"/api/bo-nho", "kw.view", "view"),
     ("GET", r"/api/sao-luu/dau", "kw.view", "view"),
     ("GET", r"/api/sao-luu\.tar\.gz", "kw.view", "view"),
     ("POST", r"/api/analysis/[^/]+", "kw.edit", "edit"),

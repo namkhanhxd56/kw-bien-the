@@ -13,7 +13,9 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import os
 import tarfile
+import tempfile
 import threading
 from pathlib import Path
 
@@ -65,24 +67,46 @@ def dau(goc: Path) -> dict:
                 "bo_qua": sorted(BO_QUA_THU_MUC)}
 
 
-def nen(goc: Path) -> tuple[bytes, dict]:
-    """tar.gz trong bộ nhớ (vài chục MB là cùng) + dấu đúng những file đã đóng gói."""
-    buf = io.BytesIO()
-    tong = hashlib.sha256()
-    so = 0
-    with gzip.GzipFile(fileobj=buf, mode="wb", mtime=0) as gz, tarfile.open(fileobj=gz, mode="w") as tar:
-        for p in _cac_file(goc):
-            rel = p.relative_to(goc).as_posix()
-            try:
-                data = p.read_bytes()
-                st = p.stat()
-            except FileNotFoundError:
-                continue
-            ti = tarfile.TarInfo(rel)
-            ti.size = len(data)
-            ti.mtime = int(st.st_mtime)
-            ti.mode = 0o644
-            tar.addfile(ti, io.BytesIO(data))
-            tong.update(f"{rel}\0{hashlib.sha256(data).hexdigest()}\n".encode())
-            so += 1
-    return buf.getvalue(), {"dau": tong.hexdigest(), "so_file": so}
+_nen_khoa = threading.Lock()                   # mỗi lúc chỉ nén một bản (trước đây mỗi lượt kéo nén riêng trong RAM)
+_nen_cu: dict = {}                             # bản nén gần nhất: {"file": Path, "dau": str, "so_file": int}
+
+
+def nen(goc: Path, thu_muc_tam: Path | None = None) -> tuple[Path, dict]:
+    """tar.gz ghi ra FILE TẠM trên ổ (không giữ trong RAM) + dấu đúng những file đã đóng gói.
+    Dữ liệu chưa đổi so với lần nén trước thì trả lại đúng file đó, khỏi nén lại.
+    Ngày 24/11/2026 bản nén trong RAM (mỗi lượt kéo một bản, kéo lại khi chậm) góp phần đẩy RAM lên 8 GB."""
+    thu_muc_tam = Path(thu_muc_tam or tempfile.gettempdir())
+    with _nen_khoa:
+        hien = dau(goc)["dau"]
+        cu = _nen_cu.get("file")
+        if cu and _nen_cu.get("dau") == hien and cu.is_file():
+            return cu, {"dau": _nen_cu["dau"], "so_file": _nen_cu["so_file"]}
+        fd, ten = tempfile.mkstemp(prefix="kw-sao-luu-", suffix=".tar.gz", dir=thu_muc_tam)
+        moi = Path(ten)
+        tong = hashlib.sha256()
+        so = 0
+        try:
+            with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz, \
+                    tarfile.open(fileobj=gz, mode="w") as tar:
+                for p in _cac_file(goc):
+                    rel = p.relative_to(goc).as_posix()
+                    try:
+                        data = p.read_bytes()
+                        st = p.stat()
+                    except FileNotFoundError:
+                        continue
+                    ti = tarfile.TarInfo(rel)
+                    ti.size = len(data)
+                    ti.mtime = int(st.st_mtime)
+                    ti.mode = 0o644
+                    tar.addfile(ti, io.BytesIO(data))
+                    tong.update(f"{rel}\0{hashlib.sha256(data).hexdigest()}\n".encode())
+                    so += 1
+                    del data
+        except BaseException:
+            moi.unlink(missing_ok=True)
+            raise
+        if cu and cu != moi:
+            cu.unlink(missing_ok=True)     # người đang tải bản cũ vẫn đọc tiếp được (file đã mở trên Linux)
+        _nen_cu.update(file=moi, dau=tong.hexdigest(), so_file=so)
+        return moi, {"dau": _nen_cu["dau"], "so_file": so}

@@ -32,6 +32,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -395,8 +396,28 @@ def danh_sach_may() -> list[dict]:
     return out
 
 
+def bo_nho() -> dict:
+    """RAM tiến trình và các bộ nhớ đệm lớn — để thấy ngay phần nào phình (24/11/2026 RAM chạm 8 GB rồi bị kill)."""
+    out = {"ok": True, "so_luong": threading.active_count()}
+    try:
+        for dong in Path("/proc/self/status").read_text().splitlines():
+            k, _, v = dong.partition(":")
+            if k in ("VmRSS", "VmHWM", "VmSize"):
+                out[k] = v.strip()
+    except OSError:
+        import resource
+        out["max_rss_kb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    with _bo_cache_khoa:
+        out["bo_cache"] = {"so": len(_bo_cache), "toi_da": BO_CACHE_MAX}
+    out["danh_sach_ma_byte"] = len(_sp["body"])
+    out["tom_tat_asin_so"] = len(store._tt_cache)
+    out["sao_luu"] = {k: str(v) for k, v in sao_luu._nen_cu.items()}
+    return out
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "KWBienThe/0.1"
+    timeout = 300   # máy khách treo / bỏ đi giữa chừng thì luồng tự thoát sau 5 phút, không đọng lại mãi
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
@@ -481,6 +502,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._status()
                 if path == "/api/products":
                     return self._products(q.get("refresh") == ["1"])
+                if path == "/api/bo-nho":
+                    return self._json(bo_nho())
                 if path == "/api/sao-luu/dau":
                     return self._json(sao_luu.dau(DATA))
                 if path == "/api/sao-luu.tar.gz":
@@ -875,10 +898,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _sao_luu(self):
         """Bản sao toàn kho cho máy khác lưu (Mac mini). Không có img/ và capture/ (xem sao_luu.py)."""
-        body, info = sao_luu.nen(DATA)
-        self._send(200, body, "application/gzip", {
-            "X-Sao-Luu-Dau": info["dau"], "X-Sao-Luu-So-File": str(info["so_file"]),
-            "Content-Disposition": 'attachment; filename="kw-bien-the-%s.tar.gz"' % time.strftime("%Y%m%d-%H%M")})
+        f, info = sao_luu.nen(DATA)
+        with open(f, "rb") as fh:            # mở trước: lượt nén sau có xoá file thì vẫn đọc tiếp được
+            self.send_response(200)
+            self.send_header("Content-Type", "application/gzip")
+            self.send_header("Content-Length", str(os.fstat(fh.fileno()).st_size))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Sao-Luu-Dau", info["dau"])
+            self.send_header("X-Sao-Luu-So-File", str(info["so_file"]))
+            self.send_header("Content-Disposition",
+                             'attachment; filename="kw-bien-the-%s.tar.gz"' % time.strftime("%Y%m%d-%H%M"))
+            self.end_headers()
+            shutil.copyfileobj(fh, self.wfile, 1 << 20)   # gửi từng 1 MB, không nạp cả file vào RAM
 
     def _agent_capture_file(self, ten: str):
         # Request H10 đã ghi: chỉ trao cho ai có AGENT_TOKEN (dù đã ẩn cookie/token, vẫn là dữ liệu tài khoản)
