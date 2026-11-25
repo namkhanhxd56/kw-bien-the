@@ -513,7 +513,7 @@ class Handler(BaseHTTPRequestHandler):
                     ma = m.group(1)
                     p = mot_ma(ma)
                     if not p:
-                        return self._err(404, f"Không còn thấy mã {ma} trong bảng Lark (view nguồn)")
+                        return self._err(404, f"Không còn thấy mã {ma} trong bảng Lark ")
                     return self._json({"ok": True, "product": p})
                 m = re.fullmatch(r"/api/products/([^/]+)/image", path)
                 if m:

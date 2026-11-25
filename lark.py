@@ -28,6 +28,9 @@ from pathlib import Path
 BASE = os.environ.get("LARK_BASE", "B53NbhHkBajDp5sKCTQjM96wpTc")
 TABLE = os.environ.get("LARK_TABLE", "tblfV1JMXzQWifcp")          # PPC - Phân tích Keyword
 VIEW = os.environ.get("LARK_VIEW", "vewB6dmunC")
+# Mặc định đọc CẢ BẢNG, không theo view: ai đó đặt filter trên view Lark (25/11/2026: "Link bộ Keyword trống")
+# là danh sách mã trong tool bị thu lại theo (1.850 → 86 mã). Đặt LARK_THEO_VIEW=1 nếu thật sự muốn đọc theo view.
+THEO_VIEW = os.environ.get("LARK_THEO_VIEW", "").strip() in ("1", "true", "yes")
 FLOW_TABLE = os.environ.get("LARK_FLOW_TABLE", "tblgYQwrwcFLwX5i")  # 🌼 2026 Product Flow
 CLI = os.environ.get("LARK_CLI", "lark-cli")
 APP_ID = os.environ.get("LARK_APP_ID", "").strip()
@@ -171,14 +174,18 @@ def _field_id(table: str, name: str) -> str:
     return _field_ids.get((table, name), "")
 
 
+def _view() -> dict:
+    return {"view_id": VIEW} if THEO_VIEW else {}
+
+
 def _rows() -> list[tuple[str, dict]]:
-    """Mọi dòng của view nguồn → [(record_id, {tên field: giá trị})]."""
+    """Mọi dòng của bảng (hoặc view nguồn nếu LARK_THEO_VIEW=1) → [(record_id, {tên field: giá trị})]."""
     if BACKEND == "openapi":
-        return _search(TABLE, {"view_id": VIEW, "automatic_fields": False})
+        return _search(TABLE, {**_view(), "automatic_fields": False})
     rows, offset = [], 0
     while True:
         d = _run(["base", "+record-list", "--base-token", BASE, "--table-id", TABLE,
-                  "--view-id", VIEW, "--limit", "200", "--offset", str(offset), "--format", "json"])
+                  *(["--view-id", VIEW] if THEO_VIEW else []), "--limit", "200", "--offset", str(offset), "--format", "json"])
         names = d.get("fields") or []
         rows += [(rid, dict(zip(names, row))) for rid, row in zip(d.get("record_id_list") or [], d.get("data") or [])]
         if not d.get("has_more"):
@@ -273,7 +280,7 @@ def _luu_cache() -> None:
 def _rows_cua_ma(ma: str) -> list[tuple[str, dict]]:
     """Các dòng của một mã trong view nguồn (thường 1 dòng) → [(record_id, {tên field: giá trị})]. Tốn 1 lượt API."""
     if BACKEND == "openapi":
-        return _search(TABLE, {"view_id": VIEW, "automatic_fields": False, "filter": {
+        return _search(TABLE, {**_view(), "automatic_fields": False, "filter": {
             "conjunction": "and", "conditions": [{"field_name": F_MA, "operator": "is", "value": [ma]}]}})
     # lark-cli (ở máy): đọc theo record_id đã biết trong danh sách
     rids = [p["record_id"] for p in _cache["items"] if p["ma"] == ma]

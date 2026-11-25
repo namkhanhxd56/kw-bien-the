@@ -103,7 +103,7 @@ Cách chạy một job:
 ## Biến môi trường
 
 `HOST`, `PORT`, `PUBLIC_URL` (domain dựng link; trên Railway mặc định lấy `RAILWAY_PUBLIC_DOMAIN`),
-`DATA_DIR`, `AGENT_TOKEN`, `DAILY_LIMIT`, `SV_MIN`, `RANK_MIN`, `RANK_MAX` (mặc định 100), `LARK_BASE`, `LARK_TABLE`, `LARK_VIEW`,
+`DATA_DIR`, `AGENT_TOKEN`, `DAILY_LIMIT`, `SV_MIN`, `RANK_MIN`, `RANK_MAX` (mặc định 100), `LARK_BASE`, `LARK_TABLE`, `LARK_VIEW` (chỉ dùng khi `LARK_THEO_VIEW=1`; mặc định đọc cả bảng),
 `LARK_FLOW_TABLE`, `LARK_APP_ID` + `LARK_APP_SECRET` (có thì đọc Lark bằng Open API thay cho lark-cli),
 `BRO_AUTH_URL` + `BRO_AUTH_API_KEY` (đăng nhập).
 
