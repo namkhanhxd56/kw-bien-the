@@ -21,7 +21,7 @@
 
 export const ADAPTER = {
   ready: true,
-  version: "ui-2026-11-14",
+  version: "ui-2026-11-25",
   cerebroUrl: "https://members.helium10.com/cerebro-new",
 
   // Viết dạng `function` (không viết `async run() {}`): Chrome tiêm hàm bằng mã nguồn của nó, mà mã nguồn
@@ -214,6 +214,18 @@ export const ADAPTER = {
         const [nam, thang] = String(filters.period).split("-").map(Number);
         const TEN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][thang - 1];
         await nghi();
+        // Khung Filters thu gọn ("Show Filters") thì ô Time Period không được vẽ ra. H10 nhớ trạng thái thu gọn,
+        // nên máy nào lỡ thu gọn một lần là hỏng liên tục (25/11/2026: 162 lần "Hết giờ chờ: ô Time Period").
+        const nutShowFilters = () => [...document.querySelectorAll("button, [role=button], a, span, div")]
+          .find(el => thay(el) && /^show filters$/i.test((el.innerText || "").trim()) && el.children.length <= 2);
+        if (!q('input[placeholder="Current"]')) {
+          const nut = await cho(() => q('input[placeholder="Current"]') || nutShowFilters(), 10000, "").catch(() => null);
+          if (nut && nut.tagName !== "INPUT") {
+            bam(nut.closest("button, [role=button], a") || nut);
+            log("mở khung Filters (đang thu gọn)");
+            await nghi(400, 900);
+          }
+        }
         const oKy = await cho(() => q('input[placeholder="Current"]'), 20000, "ô Time Period");
         gan = oKy;
         const namCua = el => {
