@@ -40,7 +40,7 @@ Popup extension cho biết:
 - việc đang làm và kết quả lần cuối.
 
 **Khi có bản extension mới:** tải lại `extension.zip`, chép đè vào thư mục cũ, rồi bấm nút tải lại ↻ của
-extension ở `chrome://extensions`. Popup hiện số phiên bản (hiện tại là v0.1.10).
+extension ở `chrome://extensions`. Popup hiện số phiên bản (hiện tại là v0.1.11).
 
 **Nhiều tài khoản H10:** một phiên đăng nhập H10 có thể có 2–3 tài khoản (avatar → Switch Accounts). Từ bản 0.1.9,
 extension tự chuyển tài khoản khi gặp một trong hai trường hợp:

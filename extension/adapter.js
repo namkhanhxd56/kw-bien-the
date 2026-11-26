@@ -21,7 +21,7 @@
 
 export const ADAPTER = {
   ready: true,
-  version: "ui-2026-11-25",
+  version: "ui-2026-11-26",
   cerebroUrl: "https://members.helium10.com/cerebro-new",
 
   // Viết dạng `function` (không viết `async run() {}`): Chrome tiêm hàm bằng mã nguồn của nó, mà mã nguồn
@@ -216,13 +216,30 @@ export const ADAPTER = {
         await nghi();
         // Khung Filters thu gọn ("Show Filters") thì ô Time Period không được vẽ ra. H10 nhớ trạng thái thu gọn,
         // nên máy nào lỡ thu gọn một lần là hỏng liên tục (25/11/2026: 162 lần "Hết giờ chờ: ô Time Period").
-        const nutShowFilters = () => [...document.querySelectorAll("button, [role=button], a, span, div")]
-          .find(el => thay(el) && /^show filters$/i.test((el.innerText || "").trim()) && el.children.length <= 2);
+        // 0.1.10 bấm vào thẻ NGOÀI CÙNG có chữ "Show Filters" (querySelectorAll trả cha trước con) nên sự kiện
+        // không tới phần tử thật (nút/công tắc nằm bên trong) → khung vẫn thu gọn. Giờ lấy thẻ SÂU NHẤT,
+        // rồi thử lần lượt: nút/label/công tắc bao nó, checkbox gần đó, chính nó, thẻ cha — mỗi cách chờ 3 giây.
+        const nutShowFilters = () => {
+          const ds = [...document.querySelectorAll("*")].filter(el => thay(el) && /^show filters$/i.test((el.innerText || "").trim()));
+          return ds.find(el => !ds.some(c => c !== el && el.contains(c))) || null;
+        };
         if (!q('input[placeholder="Current"]')) {
           const nut = await cho(() => q('input[placeholder="Current"]') || nutShowFilters(), 10000, "").catch(() => null);
           if (nut && nut.tagName !== "INPUT") {
-            bam(nut.closest("button, [role=button], a") || nut);
-            log("mở khung Filters (đang thu gọn)");
+            log(`khung Filters đang thu gọn: ${nut.outerHTML.slice(0, 160)}`);
+            const vung = nut.closest("label, button, [role=button], [role=switch], a") || nut.parentElement;
+            const thu = [
+              nut.closest("button, [role=button], [role=switch], label, a"),
+              (vung && vung.querySelector('input[type=checkbox], [role=switch], button')) ||
+                nut.parentElement?.querySelector('input[type=checkbox], [role=switch], button'),
+              nut,
+              nut.parentElement,
+            ].filter((el, i, a) => el && a.indexOf(el) === i);
+            for (const [i, el] of thu.entries()) {
+              if (el.tagName === "INPUT") el.click(); else bam(el);
+              log(`bấm mở khung Filters (cách ${i + 1}: ${el.tagName.toLowerCase()})`);
+              if (await cho(() => q('input[placeholder="Current"]'), 4000, "").catch(() => null)) break;
+            }
             await nghi(400, 900);
           }
         }
